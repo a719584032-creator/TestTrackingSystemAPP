@@ -58,15 +58,39 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.setMovable(False)
         toolbar.addWidget(QtWidgets.QLabel("部门:"))
         self._department_combo = QtWidgets.QComboBox()
+        self._department_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._department_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._department_combo.setMinimumContentsLength(8)
         toolbar.addWidget(self._department_combo)
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("项目:"))
         self._project_combo = QtWidgets.QComboBox()
+        self._project_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._project_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._project_combo.setMinimumContentsLength(8)
         toolbar.addWidget(self._project_combo)
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("计划:"))
         self._plan_combo = QtWidgets.QComboBox()
+        self._plan_combo.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._plan_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._plan_combo.setMinimumContentsLength(8)
         toolbar.addWidget(self._plan_combo)
+        toolbar.addSeparator()
+        toolbar.addWidget(QtWidgets.QLabel("机型:"))
+        self._device_filter = QtWidgets.QComboBox()
+        self._device_filter.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._device_filter.setMinimumContentsLength(8)
+        toolbar.addWidget(self._device_filter)
         toolbar.addSeparator()
         refresh_action = QtWidgets.QAction("刷新", self)
         refresh_action.triggered.connect(self._reload_current_plan)
@@ -88,22 +112,26 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.setHorizontalSpacing(12)
         filter_layout.addWidget(QtWidgets.QLabel("目录"), 0, 0)
         self._directory_filter = QtWidgets.QComboBox()
+        self._directory_filter.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._directory_filter.setMinimumContentsLength(8)
         self._directory_filter.addItem("全部", None)
         filter_layout.addWidget(self._directory_filter, 0, 1)
 
-        filter_layout.addWidget(QtWidgets.QLabel("机型"), 0, 2)
-        self._device_filter = QtWidgets.QComboBox()
-        self._device_filter.addItem("全部", None)
-        filter_layout.addWidget(self._device_filter, 0, 3)
-
         filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 0)
         self._result_filter = QtWidgets.QComboBox()
+        self._result_filter.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        self._result_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._result_filter.setMinimumContentsLength(8)
         self._result_filter.addItem("全部", None)
         for value in ["pass", "fail", "blocked", "pending", "skipped"]:
             self._result_filter.addItem(value, value)
-        filter_layout.addWidget(self._result_filter, 1, 1, 1, 3)
+        filter_layout.addWidget(self._result_filter, 1, 1)
         filter_layout.setColumnStretch(1, 1)
-        filter_layout.setColumnStretch(3, 1)
 
         left_panel.addWidget(filter_box)
 
@@ -386,9 +414,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
-        self._device_filter.addItem("全部", None)
-        for name in devices:
-            self._device_filter.addItem(name, name)
+        self._device_filter.addItem("请选择机型", None)
+        if devices:
+            for name in devices:
+                self._device_filter.addItem(name, name)
+            self._device_filter.setEnabled(True)
+        else:
+            self._device_filter.setItemText(0, "暂无可选机型")
+            self._device_filter.setEnabled(False)
         self._device_filter.blockSignals(False)
         self._device_filter.setCurrentIndex(0)
 
@@ -413,6 +446,11 @@ class MainWindow(QtWidgets.QMainWindow):
         directory_value = self._directory_filter.currentData()
         device_value = self._device_filter.currentData()
         result_value = self._result_filter.currentData()
+
+        if device_value is None:
+            self._filtered_cases = []
+            self._refresh_case_tree()
+            return
 
         def matches(case: PlanCase) -> bool:
             if directory_value and self._normalize_directory(case.group_path) != directory_value:
