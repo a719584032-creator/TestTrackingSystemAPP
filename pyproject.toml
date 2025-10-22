@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tts-client"
+version = "1.0.0"
+description = "Desktop client for the Test Tracking System"
+authors = [{name = "PATVS QA"}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt5",
+    "requests",
+]
+
+[project.scripts]
+tts-client = "TestTrackingSystemAPP.tts_client.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["TestTrackingSystemAPP*"]
