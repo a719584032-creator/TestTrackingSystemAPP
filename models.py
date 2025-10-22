@@ -90,6 +90,15 @@ class PlanCase:
 
 
 @dataclass
+class PlanDeviceModel:
+    plan_device_model_id: Optional[int]
+    device_model_id: Optional[int]
+    name: str
+    model_code: Optional[str] = None
+    category: Optional[str] = None
+
+
+@dataclass
 class ExecutionAttachment:
     file_name: str
     content: str
