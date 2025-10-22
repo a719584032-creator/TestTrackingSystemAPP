@@ -33,7 +33,7 @@ class LoginDialog(QtWidgets.QDialog):
         title_label.setAlignment(QtCore.Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 26px; font-weight: 600; color: #f7f9fc;")
 
-        subtitle = QtWidgets.QLabel("请使用公司账号登录以继续")
+        subtitle = QtWidgets.QLabel("请登录账号以继续")
         subtitle.setAlignment(QtCore.Qt.AlignCenter)
         subtitle.setStyleSheet("color: #8a94a6; font-size: 14px;")
 
@@ -94,7 +94,7 @@ class LoginDialog(QtWidgets.QDialog):
 
         main_layout.addWidget(form_widget)
 
-        footer = QtWidgets.QLabel("© 2025 PATVS QA Platform")
+        footer = QtWidgets.QLabel("© 2025 TestTrackingSystem QA Platform")
         footer.setAlignment(QtCore.Qt.AlignCenter)
         footer.setStyleSheet("color: #4b5563; font-size: 12px;")
         main_layout.addStretch()

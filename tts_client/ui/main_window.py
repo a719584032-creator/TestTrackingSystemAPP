@@ -53,7 +53,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar = QtWidgets.QToolBar()
         toolbar.setIconSize(QtCore.QSize(20, 20))
         toolbar.setMovable(False)
-        toolbar.addWidget(QtWidgets.QLabel("部署:"))
+        toolbar.addWidget(QtWidgets.QLabel("部门:"))
         self._department_combo = QtWidgets.QComboBox()
         toolbar.addWidget(self._department_combo)
         toolbar.addSeparator()

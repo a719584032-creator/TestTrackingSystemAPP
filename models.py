@@ -12,7 +12,7 @@ class Department:
     name: str
     code: Optional[str] = None
     active: bool = True
-
+    counts: dict | None = None
 
 @dataclass
 class Project:

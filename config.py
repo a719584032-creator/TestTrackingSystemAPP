@@ -9,7 +9,7 @@ from dataclasses import dataclass
 class ApiConfig:
     """REST API related configuration."""
 
-    base_url: str = os.getenv("PATVS_API_BASE_URL", "http://10.184.37.17:5173/api")
+    base_url: str = os.getenv("PATVS_API_BASE_URL", "http://10.184.37.17:8888/api")
     timeout_seconds: int = int(os.getenv("PATVS_API_TIMEOUT", "30"))
 
 
