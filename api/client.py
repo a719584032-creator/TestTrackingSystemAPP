@@ -13,6 +13,8 @@ from ..models import (
     ExecutionPayload,
     Plan,
     PlanCase,
+    PlanCaseStep,
+    PlanDeviceModel,
     Project,
 )
 
@@ -78,6 +80,39 @@ class ApiClient:
             plans.append(Plan(**item))
         return plans
 
+    def get_plan_device_models(self, plan_id: int) -> List[PlanDeviceModel]:
+        payload = self._get(f"/test-plans/{plan_id}")
+        data = payload.get("data", {})
+        models: List[PlanDeviceModel] = []
+        for item in data.get("device_models", []) or []:
+            device_info = item.get("device_model") or {}
+            name = (
+                item.get("name")
+                or device_info.get("name")
+                or item.get("device_model_name")
+                or ""
+            )
+            models.append(
+                PlanDeviceModel(
+                    plan_device_model_id=
+                        item.get("id")
+                        or item.get("plan_device_model_id")
+                        or device_info.get("plan_device_model_id"),
+                    device_model_id=
+                        item.get("device_model_id") or device_info.get("id"),
+                    name=name,
+                    model_code=
+                        item.get("model_code")
+                        or device_info.get("model_code")
+                        or item.get("device_model_code"),
+                    category=
+                        item.get("category")
+                        or device_info.get("category")
+                        or item.get("device_model_category"),
+                )
+            )
+        return models
+
     def get_plan_cases(
         self,
         plan_id: int,
@@ -99,6 +134,19 @@ class ApiClient:
         cases: List[PlanCase] = []
         for item in payload["data"]["cases"]:
             item.setdefault("execution_results", [])
+            steps_payload = item.get("steps") or []
+            steps: List[PlanCaseStep] = []
+            for step in steps_payload:
+                steps.append(
+                    PlanCaseStep(
+                        no=step.get("no", len(steps) + 1),
+                        action=step.get("action", ""),
+                        expected=step.get("expected", ""),
+                        note=step.get("note", ""),
+                        keyword=step.get("keyword", ""),
+                    )
+                )
+            item["steps"] = steps
             cases.append(PlanCase(**item))
         return cases
 
