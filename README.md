@@ -1,17 +1,29 @@
-# PATVS 桌面客户端
+# TTS 测试执行客户端
 
-该目录为全新的 PyQt5 客户端实现，聚焦测试计划执行与监控功能。
+基于 PyQt5 的全新测试执行客户端，专注于计划调度、用例执行与硬件监控。项目现已完全迁移至重构后的架构，旧版 PATVS UI 及其依赖已被移除。
 
-## 功能概述
-- 登录与记住密码
-- 部门/项目/计划三级筛选，支持目录、机型、优先级、结果过滤
-- 用例执行记录（含图片上传、缺陷信息、起止时间加密）
-- 关键字驱动的多种监控动作（时间、电源/USB 插拔、S3/S4/S5/Restart 等）
-- OTA 更新检测（JSON Feed）
-- 一键打包：运行 `python -m client_app.build`
+## 架构概览
+- `main.py` / `TestTrackingSystemAPP.__main__`：向后兼容的入口，统一委托到 `tts_client.app.main`。
+- `tts_client/app.py`：Qt 启动器，组装 API 客户端、认证存储、窗口状态、监控管理和 OTA 更新检查。
+- `tts_client/core/`：领域逻辑层，包含 REST API 封装、数据模型、凭据加密、日志配置、监控关键字解析、窗口状态持久化和 OTA 更新实现。
+- `tts_client/ui/`：PyQt5 界面组件（登录对话框与主窗口），与 `core` 层解耦，通过信号槽驱动业务逻辑。
+- `tts_client/monitoring/`：对接遗留的硬件监控脚本，将日志与完成状态转换为 Qt 信号，供主窗口使用。
 
-## 运行
+## 功能特性
+- 记住密码的登录体验（本地凭据加密存储）。
+- 部门/项目/计划三级筛选与用例树视图，支持目录、机型、优先级、结果过滤。
+- 用例执行记录：备注、失败原因、缺陷编号、设备选择、附件上传与执行时间追踪。
+- 监控关键字解析与执行，支持多种硬件操作并实时输出日志。
+- OTA 更新检测：启动时自动检查 JSON Feed 并提示新版本。
+- PyInstaller 打包脚本，生成可分发的桌面应用。
+
+## 快速开始
 ```bash
 pip install -r requirements.txt
-python -m client_app.main
+python -m TestTrackingSystemAPP.main
+```
+
+## 打包
+```bash
+python -m TestTrackingSystemAPP.build
 ```
