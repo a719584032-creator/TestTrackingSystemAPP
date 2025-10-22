@@ -5,26 +5,41 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .config import SETTINGS
+from .security import decrypt_password, encrypt_password
 from .storage import load_json, save_json
 
 
 @dataclass(slots=True)
 class RememberMePayload:
-    """Represents saved credentials for automatic login."""
+    """Serialized payload persisted to disk."""
 
     username: str
-    token: str
+    password_cipher: str
 
     @classmethod
     def from_dict(cls, payload: dict[str, str]) -> "RememberMePayload":
         username = payload.get("username")
-        token = payload.get("token")
-        if not username or not token:
-            raise ValueError("missing username/token")
-        return cls(username=username, token=token)
+        cipher = payload.get("password") or payload.get("password_cipher")
+        if not username or not cipher:
+            raise ValueError("missing username/password")
+        return cls(username=username, password_cipher=cipher)
 
     def to_dict(self) -> dict[str, str]:
-        return {"username": self.username, "token": self.token}
+        return {"username": self.username, "password": self.password_cipher}
+
+    def decrypt(self) -> "RememberedCredentials":
+        password = decrypt_password(self.password_cipher)
+        if password is None:
+            raise ValueError("无法解密存储的密码")
+        return RememberedCredentials(username=self.username, password=password)
+
+
+@dataclass(slots=True)
+class RememberedCredentials:
+    """Plain-text credentials returned to the caller."""
+
+    username: str
+    password: str
 
 
 class AuthStore:
@@ -33,16 +48,20 @@ class AuthStore:
     def __init__(self) -> None:
         self._path = SETTINGS.remember_me_file
 
-    def load(self) -> Optional[RememberMePayload]:
+    def load(self) -> Optional[RememberedCredentials]:
         payload = load_json(self._path)
         if not payload:
             return None
         try:
-            return RememberMePayload.from_dict(payload)
+            stored = RememberMePayload.from_dict(payload)
+            return stored.decrypt()
         except ValueError:
+            self.clear()
             return None
 
-    def save(self, payload: RememberMePayload) -> None:
+    def save(self, credentials: RememberedCredentials) -> None:
+        cipher = encrypt_password(credentials.password)
+        payload = RememberMePayload(username=credentials.username, password_cipher=cipher)
         save_json(self._path, payload.to_dict())
 
     def clear(self) -> None:

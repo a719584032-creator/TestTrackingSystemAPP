@@ -20,10 +20,12 @@ class LoginDialog(QtWidgets.QDialog):
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        palette = self.palette()
-        palette.setColor(QtGui.QPalette.Window, QtGui.QColor("#141a26"))
-        palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor("#f7f9fc"))
-        self.setPalette(palette)
+        self.setStyleSheet(
+            "QDialog {"
+            "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0f172a, stop:1 #1e293b);"
+            "  color: #f7f9fc;"
+            "}"
+        )
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(32, 32, 32, 32)
@@ -44,9 +46,10 @@ class LoginDialog(QtWidgets.QDialog):
         form_widget.setObjectName("form_panel")
         form_widget.setStyleSheet(
             "#form_panel {"
-            "  background: #1f2937;"
-            "  border-radius: 16px;"
-            "  padding: 28px;"
+            "  background: rgba(17, 25, 40, 0.82);"
+            "  border: 1px solid rgba(148, 163, 184, 0.18);"
+            "  border-radius: 18px;"
+            "  padding: 32px;"
             "  color: #f7f9fc;"
             "}"
         )
@@ -104,8 +107,9 @@ class LoginDialog(QtWidgets.QDialog):
         self._password.returnPressed.connect(self._on_login_clicked)
 
     # ------------------------------------------------------------------
-    def set_initial_values(self, username: str, remember: bool) -> None:
+    def set_initial_values(self, username: str, password: str = "", remember: bool = True) -> None:
         self._username.setText(username)
+        self._password.setText(password)
         self._remember.setChecked(remember)
 
     def set_error(self, message: str) -> None:

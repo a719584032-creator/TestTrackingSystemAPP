@@ -87,6 +87,139 @@ class TestPlan:
 
 
 @dataclass(slots=True)
+class PlanStatistics:
+    """Aggregated execution statistics for a test plan."""
+
+    total_results: int
+    executed_results: int
+    passed: int
+    failed: int
+    blocked: int
+    skipped: int
+    not_run: int
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PlanStatistics":
+        return cls(
+            total_results=payload.get("total_results", 0),
+            executed_results=payload.get("executed_results", 0),
+            passed=payload.get("passed", 0),
+            failed=payload.get("failed", 0),
+            blocked=payload.get("blocked", 0),
+            skipped=payload.get("skipped", 0),
+            not_run=payload.get("not_run", 0),
+        )
+
+
+@dataclass(slots=True)
+class PlanTester:
+    """Tester assigned to a plan."""
+
+    id: int
+    name: str
+    username: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PlanTester":
+        tester_info = payload.get("tester") or {}
+        return cls(
+            id=payload.get("user_id")
+            or tester_info.get("id")
+            or payload.get("id")
+            or 0,
+            name=payload.get("name") or tester_info.get("username", ""),
+            username=tester_info.get("username"),
+        )
+
+    def display_name(self) -> str:
+        return self.name or (self.username or "")
+
+
+@dataclass(slots=True)
+class PlanExecutionRun:
+    """Execution summary for a single run of a plan."""
+
+    id: int
+    name: str
+    status: Optional[str]
+    run_type: Optional[str]
+    total: int
+    executed: int
+    passed: int
+    failed: int
+    blocked: int
+    skipped: int
+    not_run: int
+    start_time: Optional[str]
+    end_time: Optional[str]
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PlanExecutionRun":
+        return cls(
+            id=payload.get("id"),
+            name=payload.get("name", ""),
+            status=payload.get("status"),
+            run_type=payload.get("run_type"),
+            total=payload.get("total", 0),
+            executed=payload.get("executed", 0),
+            passed=payload.get("passed", 0),
+            failed=payload.get("failed", 0),
+            blocked=payload.get("blocked", 0),
+            skipped=payload.get("skipped", 0),
+            not_run=payload.get("not_run", 0),
+            start_time=payload.get("start_time"),
+            end_time=payload.get("end_time"),
+        )
+
+
+@dataclass(slots=True)
+class PlanDetail:
+    """Detailed information for a selected test plan."""
+
+    id: int
+    name: str
+    description: Optional[str]
+    department_name: Optional[str]
+    project_name: Optional[str]
+    start_date: Optional[str]
+    end_date: Optional[str]
+    status: Optional[str]
+    testers: List[PlanTester] = field(default_factory=list)
+    device_models: List[DeviceModel] = field(default_factory=list)
+    statistics: Optional[PlanStatistics] = None
+    execution_runs: List[PlanExecutionRun] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PlanDetail":
+        return cls(
+            id=payload.get("id"),
+            name=payload.get("name", ""),
+            description=payload.get("description"),
+            department_name=payload.get("department_name"),
+            project_name=payload.get("project_name"),
+            start_date=payload.get("start_date"),
+            end_date=payload.get("end_date"),
+            status=payload.get("status"),
+            testers=[PlanTester.from_dict(item) for item in payload.get("testers", [])],
+            device_models=[DeviceModel.from_dict(item) for item in payload.get("device_models", [])],
+            statistics=PlanStatistics.from_dict(payload.get("statistics", {}))
+            if payload.get("statistics")
+            else None,
+            execution_runs=[
+                PlanExecutionRun.from_dict(item) for item in payload.get("execution_runs", [])
+            ],
+        )
+
+    def tester_names(self) -> List[str]:
+        names: List[str] = []
+        for tester in self.testers:
+            name = tester.display_name()
+            if name:
+                names.append(name)
+        return names
+
+
+@dataclass(slots=True)
 class CaseExecutionResult:
     """Represents a single execution run for a plan case."""
 
