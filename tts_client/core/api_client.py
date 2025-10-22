@@ -10,7 +10,7 @@ import requests
 
 from .config import SETTINGS
 from .exceptions import AuthenticationError, ClientError, NetworkError
-from .models import Department, PlanCase, Project, TestPlan
+from .models import Department, PlanCase, PlanDetail, Project, TestPlan
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,10 @@ class ApiClient:
             },
         )
         return [TestPlan.from_dict(item) for item in payload.get("data", {}).get("items", [])]
+
+    def get_plan_detail(self, plan_id: int) -> PlanDetail:
+        payload = self._request("GET", f"/test-plans/{plan_id}")
+        return PlanDetail.from_dict(payload.get("data", {}))
 
     def get_plan_cases(self, plan_id: int) -> List[PlanCase]:
         payload = self._request("GET", f"/test-plans/{plan_id}/cases")

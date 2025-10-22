@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 from typing import Dict, List, Optional
 
@@ -9,7 +10,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ..core.api_client import ApiClient, encode_attachment
 from ..core.exceptions import AuthenticationError, ClientError, ValidationError
-from ..core.models import Department, PlanCase, Project, TestPlan
+from ..core.models import Department, PlanCase, PlanDetail, Project, TestPlan
 from ..core.monitor_parser import MonitoringAction, parse_keywords, require_attachment
 from ..core.settings import WindowStateStore
 from ..monitoring.manager import MonitoringManager
@@ -30,6 +31,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._monitoring = monitoring
         self._state_store = state_store
         self._user = user_info
+        self._logger = logging.getLogger(__name__)
 
         self._departments: List[Department] = []
         self._projects: List[Project] = []
@@ -39,6 +41,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_case: Optional[PlanCase] = None
         self._current_actions: List[MonitoringAction] = []
         self._attachments: List[Dict[str, str]] = []
+        self._plan_detail: Optional[PlanDetail] = None
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -82,39 +85,62 @@ class MainWindow(QtWidgets.QMainWindow):
 
         filter_box = QtWidgets.QGroupBox("筛选")
         filter_layout = QtWidgets.QGridLayout(filter_box)
+        filter_layout.setHorizontalSpacing(12)
         filter_layout.addWidget(QtWidgets.QLabel("目录"), 0, 0)
-        self._directory_filter = QtWidgets.QLineEdit()
+        self._directory_filter = QtWidgets.QComboBox()
+        self._directory_filter.addItem("全部", None)
         filter_layout.addWidget(self._directory_filter, 0, 1)
 
         filter_layout.addWidget(QtWidgets.QLabel("机型"), 0, 2)
         self._device_filter = QtWidgets.QComboBox()
-        self._device_filter.addItem("全部")
+        self._device_filter.addItem("全部", None)
         filter_layout.addWidget(self._device_filter, 0, 3)
 
-        filter_layout.addWidget(QtWidgets.QLabel("优先级"), 1, 0)
-        self._priority_filter = QtWidgets.QComboBox()
-        self._priority_filter.addItems(["全部", "P0", "P1", "P2", "P3"])
-        filter_layout.addWidget(self._priority_filter, 1, 1)
-
-        filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 2)
+        filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 0)
         self._result_filter = QtWidgets.QComboBox()
-        self._result_filter.addItems(["全部", "pass", "fail", "blocked", "pending"])
-        filter_layout.addWidget(self._result_filter, 1, 3)
+        self._result_filter.addItem("全部", None)
+        for value in ["pass", "fail", "blocked", "pending", "skipped"]:
+            self._result_filter.addItem(value, value)
+        filter_layout.addWidget(self._result_filter, 1, 1, 1, 3)
+        filter_layout.setColumnStretch(1, 1)
+        filter_layout.setColumnStretch(3, 1)
 
         left_panel.addWidget(filter_box)
 
-        self._case_table = QtWidgets.QTableWidget(0, 5)
-        self._case_table.setHorizontalHeaderLabels(["ID", "标题", "优先级", "目录", "最新结果"])
-        self._case_table.horizontalHeader().setStretchLastSection(True)
-        self._case_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self._case_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        left_panel.addWidget(self._case_table, stretch=1)
+        self._case_tree = QtWidgets.QTreeWidget()
+        self._case_tree.setHeaderLabels(["用例标题"])
+        self._case_tree.header().setStretchLastSection(True)
+        self._case_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self._case_tree.setIndentation(18)
+        self._case_tree.setUniformRowHeights(True)
+        left_panel.addWidget(self._case_tree, stretch=1)
 
         root_layout.addLayout(left_panel, stretch=3)
 
         # Right: detail and monitoring panel
         detail_panel = QtWidgets.QVBoxLayout()
         detail_panel.setSpacing(10)
+
+        plan_box = QtWidgets.QGroupBox("计划概览")
+        plan_layout = QtWidgets.QGridLayout(plan_box)
+        plan_layout.setVerticalSpacing(6)
+        plan_layout.addWidget(QtWidgets.QLabel("状态"), 0, 0)
+        self._plan_status_label = QtWidgets.QLabel("-")
+        plan_layout.addWidget(self._plan_status_label, 0, 1)
+        plan_layout.addWidget(QtWidgets.QLabel("时间周期"), 1, 0)
+        self._plan_period_label = QtWidgets.QLabel("-")
+        self._plan_period_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_period_label, 1, 1)
+        plan_layout.addWidget(QtWidgets.QLabel("测试人员"), 2, 0)
+        self._plan_tester_label = QtWidgets.QLabel("-")
+        self._plan_tester_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_tester_label, 2, 1)
+        plan_layout.addWidget(QtWidgets.QLabel("执行统计"), 3, 0)
+        self._plan_stats_label = QtWidgets.QLabel("-")
+        self._plan_stats_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_stats_label, 3, 1)
+        plan_layout.setColumnStretch(1, 1)
+        detail_panel.addWidget(plan_box)
 
         self._title_label = QtWidgets.QLabel("请选择一条用例")
         self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
@@ -214,11 +240,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._department_combo.currentIndexChanged.connect(self._on_department_changed)
         self._project_combo.currentIndexChanged.connect(self._on_project_changed)
         self._plan_combo.currentIndexChanged.connect(self._on_plan_changed)
-        self._directory_filter.textChanged.connect(self._apply_filters)
+        self._directory_filter.currentIndexChanged.connect(self._apply_filters)
         self._device_filter.currentIndexChanged.connect(self._apply_filters)
-        self._priority_filter.currentIndexChanged.connect(self._apply_filters)
         self._result_filter.currentIndexChanged.connect(self._apply_filters)
-        self._case_table.itemSelectionChanged.connect(self._on_case_selected)
+        self._case_tree.currentItemChanged.connect(self._on_case_selected)
 
         self._start_monitor_btn.clicked.connect(self._start_monitoring)
         self._stop_monitor_btn.clicked.connect(self._stop_monitoring)
@@ -315,67 +340,216 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_plan_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._plans):
             self._cases = []
-            self._refresh_case_table()
+            self._plan_detail = None
+            self._update_plan_summary()
+            self._refresh_directory_filter()
+            self._refresh_device_filter()
+            self._filtered_cases = []
+            self._refresh_case_tree()
             return
-        plan_id = self._plan_combo.currentData()
+
+        plan = self._plans[index]
+        plan_id = int(self._plan_combo.currentData())
+        self._logger.info("选择计划 %s (ID: %s)", plan.name, plan_id)
+
         try:
-            self._cases = self._api.get_plan_cases(int(plan_id))
+            self._plan_detail = self._api.get_plan_detail(plan_id)
+        except AuthenticationError:
+            QtWidgets.QMessageBox.critical(self, "未授权", "凭据已失效，请重新登录。")
+            self.close()
+            return
+        except ClientError as exc:
+            QtWidgets.QMessageBox.warning(self, "加载计划详情失败", str(exc))
+            self._plan_detail = None
+        self._update_plan_summary()
+
+        try:
+            self._cases = self._api.get_plan_cases(plan_id)
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载用例失败", str(exc))
             self._cases = []
+        else:
+            self._logger.info("计划 %s 用例数量: %d", plan.name, len(self._cases))
+
+        self._refresh_directory_filter()
         self._refresh_device_filter()
         self._apply_filters()
 
     def _refresh_device_filter(self) -> None:
-        devices = sorted({model.name for case in self._cases for model in case.device_models if model.name})
+        devices = sorted(
+            {
+                model.name or model.model_code or str(model.id)
+                for case in self._cases
+                for model in case.device_models
+                if model.name or model.model_code
+            }
+        )
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
-        self._device_filter.addItem("全部")
+        self._device_filter.addItem("全部", None)
         for name in devices:
-            self._device_filter.addItem(name)
+            self._device_filter.addItem(name, name)
         self._device_filter.blockSignals(False)
+        self._device_filter.setCurrentIndex(0)
+
+    def _refresh_directory_filter(self) -> None:
+        directories: List[str] = []
+        seen: set[str] = set()
+        for case in self._cases:
+            directory = self._normalize_directory(case.group_path)
+            if directory not in seen:
+                seen.add(directory)
+                directories.append(directory)
+        directories.sort()
+        self._directory_filter.blockSignals(True)
+        self._directory_filter.clear()
+        self._directory_filter.addItem("全部", None)
+        for directory in directories:
+            self._directory_filter.addItem(directory, directory)
+        self._directory_filter.blockSignals(False)
+        self._directory_filter.setCurrentIndex(0)
 
     def _apply_filters(self) -> None:
-        directory_term = self._directory_filter.text().strip().lower()
-        device_name = self._device_filter.currentText()
-        priority = self._priority_filter.currentText()
-        result = self._result_filter.currentText()
+        directory_value = self._directory_filter.currentData()
+        device_value = self._device_filter.currentData()
+        result_value = self._result_filter.currentData()
 
         def matches(case: PlanCase) -> bool:
-            if directory_term and directory_term not in (case.group_path or "").lower():
+            if directory_value and self._normalize_directory(case.group_path) != directory_value:
                 return False
-            if device_name != "全部":
-                names = {model.name for model in case.device_models}
-                if device_name not in names:
+            if device_value:
+                names = {
+                    model.name or model.model_code or str(model.id)
+                    for model in case.device_models
+                    if model.name or model.model_code or model.id
+                }
+                if device_value not in names:
                     return False
-            if priority != "全部" and (case.priority or "").lower() != priority.lower():
-                return False
-            if result != "全部" and (case.latest_result or "pending") != result:
-                return False
+            if result_value:
+                latest = (case.latest_result or "pending").lower()
+                if latest != result_value:
+                    return False
             return True
 
         self._filtered_cases = [case for case in self._cases if matches(case)]
-        self._refresh_case_table()
+        self._logger.info("筛选后用例数量: %d", len(self._filtered_cases))
+        self._refresh_case_tree()
 
-    def _refresh_case_table(self) -> None:
-        self._case_table.setRowCount(len(self._filtered_cases))
-        for row, case in enumerate(self._filtered_cases):
-            self._case_table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(case.case_id)))
-            self._case_table.setItem(row, 1, QtWidgets.QTableWidgetItem(case.title))
-            self._case_table.setItem(row, 2, QtWidgets.QTableWidgetItem(case.priority or "-"))
-            self._case_table.setItem(row, 3, QtWidgets.QTableWidgetItem(case.group_path or "-"))
-            self._case_table.setItem(row, 4, QtWidgets.QTableWidgetItem(case.latest_result or "pending"))
-        if self._filtered_cases:
-            self._case_table.selectRow(0)
+    def _update_plan_summary(self) -> None:
+        detail = self._plan_detail
+        if not detail:
+            self._plan_status_label.setText("-")
+            self._plan_period_label.setText("-")
+            self._plan_tester_label.setText("-")
+            self._plan_stats_label.setText("-")
+            return
+
+        if detail.start_date and detail.end_date:
+            period = f"{detail.start_date} ~ {detail.end_date}"
+        elif detail.start_date:
+            period = f"自 {detail.start_date}"
+        elif detail.end_date:
+            period = f"截至 {detail.end_date}"
+        else:
+            period = "-"
+
+        testers = "、".join(detail.tester_names()) or "未分配"
+        if detail.statistics:
+            stats = detail.statistics
+            stats_parts = [
+                f"总数 {stats.total_results}",
+                f"已执行 {stats.executed_results}",
+                f"通过 {stats.passed}",
+                f"失败 {stats.failed}",
+                f"阻塞 {stats.blocked}",
+                f"未执行 {stats.not_run}",
+            ]
+            if stats.skipped:
+                stats_parts.append(f"跳过 {stats.skipped}")
+            stats_text = " · ".join(stats_parts)
+        else:
+            stats_text = "暂无统计数据"
+
+        self._plan_status_label.setText(detail.status or "-")
+        self._plan_period_label.setText(period)
+        self._plan_tester_label.setText(testers)
+        self._plan_stats_label.setText(stats_text)
+
+    def _refresh_case_tree(self) -> None:
+        self._case_tree.blockSignals(True)
+        self._case_tree.clear()
+        if not self._filtered_cases:
+            self._case_tree.blockSignals(False)
+            self._update_case_detail(None)
+            return
+
+        parents: dict[tuple[str, ...], QtWidgets.QTreeWidgetItem] = {}
+        root = self._case_tree.invisibleRootItem()
+
+        for case in self._filtered_cases:
+            tokens = self._directory_tokens(case.group_path)
+            parent = root
+            key: tuple[str, ...] = ()
+            for token in tokens:
+                key = key + (token,)
+                if key not in parents:
+                    node = QtWidgets.QTreeWidgetItem([token])
+                    node.setFlags(QtCore.Qt.ItemIsEnabled)
+                    parent.addChild(node)
+                    parents[key] = node
+                parent = parents[key]
+            item = QtWidgets.QTreeWidgetItem([case.title])
+            item.setData(0, QtCore.Qt.UserRole, case)
+            parent.addChild(item)
+
+        self._case_tree.expandAll()
+        self._case_tree.blockSignals(False)
+        self._select_first_case()
+
+    def _select_first_case(self) -> None:
+        root = self._case_tree.invisibleRootItem()
+
+        def find_case(node: QtWidgets.QTreeWidgetItem) -> Optional[QtWidgets.QTreeWidgetItem]:
+            for index in range(node.childCount()):
+                child = node.child(index)
+                if child.data(0, QtCore.Qt.UserRole):
+                    return child
+                found = find_case(child)
+                if found:
+                    return found
+            return None
+
+        first_case = find_case(root)
+        if first_case is not None:
+            self._case_tree.setCurrentItem(first_case)
         else:
             self._update_case_detail(None)
 
-    def _on_case_selected(self) -> None:
-        selected = self._case_table.currentRow()
-        if selected < 0 or selected >= len(self._filtered_cases):
-            self._update_case_detail(None)
+    def _normalize_directory(self, path: Optional[str]) -> str:
+        if not path:
+            return "未分组"
+        parts = [part.strip() for part in str(path).split("/") if part and part.lower() != "root"]
+        return "/".join(parts) if parts else "未分组"
+
+    def _directory_tokens(self, path: Optional[str]) -> List[str]:
+        normalized = self._normalize_directory(path)
+        if normalized == "未分组":
+            return ["未分组"]
+        return normalized.split("/")
+
+    def _on_case_selected(
+        self,
+        current: Optional[QtWidgets.QTreeWidgetItem],
+        previous: Optional[QtWidgets.QTreeWidgetItem],
+    ) -> None:
+        case = current.data(0, QtCore.Qt.UserRole) if current else None
+        if not case:
+            if previous and previous.data(0, QtCore.Qt.UserRole):
+                self._case_tree.setCurrentItem(previous)
+            else:
+                self._update_case_detail(None)
             return
-        case = self._filtered_cases[selected]
+        self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
         self._update_case_detail(case)
 
     def _update_case_detail(self, case: Optional[PlanCase]) -> None:
@@ -396,7 +570,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._title_label.setText(case.title)
         self._priority_label.setText(case.priority or "-")
         self._result_label.setText(case.latest_result or "pending")
-        self._directory_label.setText(case.group_path or "-")
+        self._directory_label.setText(self._normalize_directory(case.group_path))
         self._device_combo.clear()
         self._device_combo.addItem("(未指定)", userData=None)
         for model in case.device_models:
@@ -434,12 +608,15 @@ class MainWindow(QtWidgets.QMainWindow):
         start_time = dt.datetime.now().isoformat()
         self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
         self._append_log("监控已启动")
+        self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
         self._start_monitor_btn.setEnabled(False)
         self._stop_monitor_btn.setEnabled(True)
 
     def _stop_monitoring(self) -> None:
         self._monitoring.stop()
         self._append_log("监控停止请求已发送")
+        if self._current_case:
+            self._logger.info("已请求停止监控: 用例 %s", self._current_case.case_id)
         self._start_monitor_btn.setEnabled(True)
         self._stop_monitor_btn.setEnabled(False)
 
@@ -506,6 +683,12 @@ class MainWindow(QtWidgets.QMainWindow):
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "提交失败", str(exc))
             return
+        self._logger.info(
+            "提交结果: 用例 %s (结果=%s, 设备=%s)",
+            self._current_case.case_id,
+            result,
+            device_model_id,
+        )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
         self._remark_edit.clear()
         self._failure_edit.clear()

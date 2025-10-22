@@ -7,8 +7,9 @@ import sys
 from PyQt5 import QtWidgets
 
 from .core.api_client import ApiClient
-from .core.auth import AuthStore, RememberMePayload
+from .core.auth import AuthStore, RememberedCredentials
 from .core.exceptions import AuthenticationError, ClientError, NetworkError
+from .core.logging import configure_logging
 from .core.ota import OTAUpdater
 from .core.settings import WindowStateStore
 from .monitoring.manager import MonitoringManager
@@ -21,7 +22,8 @@ logger = logging.getLogger(__name__)
 def main() -> int:
     """Run the Qt event loop."""
 
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
+    log_dir = configure_logging()
+    logger.info("应用启动，日志目录: %s", log_dir)
 
     app = QtWidgets.QApplication(sys.argv)
     api_client = ApiClient()
@@ -33,8 +35,7 @@ def main() -> int:
     login_dialog = LoginDialog()
     remembered = auth_store.load()
     if remembered:
-        login_dialog.set_initial_values(remembered.username, True)
-        api_client.set_token(remembered.token)
+        login_dialog.set_initial_values(remembered.username, remembered.password, True)
 
     user_info: dict[str, object] = {}
 
@@ -44,16 +45,18 @@ def main() -> int:
             data = api_client.authenticate(username, password)
         except AuthenticationError as exc:
             login_dialog.set_error(str(exc))
+            logger.warning("用户 %s 登录失败（认证）: %s", username, exc)
             return
         except (ClientError, NetworkError) as exc:
             login_dialog.set_error(str(exc))
+            logger.error("用户 %s 登录失败（网络/客户端）: %s", username, exc)
             return
         user_info = data.get("user", {}) if isinstance(data, dict) else {}
-        token = data.get("token")
-        if remember and token:
-            auth_store.save(RememberMePayload(username=username, token=token))
+        if remember:
+            auth_store.save(RememberedCredentials(username=username, password=password))
         else:
             auth_store.clear()
+        logger.info("用户 %s 登录成功", username)
         login_dialog.accept()
 
     login_dialog.login_requested.connect(handle_login)

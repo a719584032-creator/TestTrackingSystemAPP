@@ -4,10 +4,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import get_patvs_root
+
 
 APP_NAME = "Test Tracking System"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+PATVS_ROOT = get_patvs_root()
 
 
 @dataclass(slots=True)
@@ -35,9 +38,10 @@ class ClientSettings:
 
     api: ApiSettings = ApiSettings()
     ota: OTASettings = OTASettings()
-    remember_me_file: Path = CONFIG_DIR / "remember_me.json"
+    remember_me_file: Path = PATVS_ROOT / "credentials.json"
     window_state_file: Path = CONFIG_DIR / "window_state.json"
     monitoring_cache_file: Path = CONFIG_DIR / "monitoring_state.json"
+    log_root: Path = PATVS_ROOT
 
 
 SETTINGS = ClientSettings()
