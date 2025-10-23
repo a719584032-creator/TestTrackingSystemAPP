@@ -207,6 +207,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_detail: Optional[PlanDetail] = None
         self._current_device_id: Optional[int] = None
         self._current_plan_device_model_id: Optional[int] = None
+        self._execution_locked = False
+        self._awaiting_monitor_completion_for_pass = False
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -270,10 +272,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._result_filter.addItem(value, value)
         filter_layout.addWidget(self._result_filter, 1, 5)
 
-        refresh_btn = QtWidgets.QPushButton("刷新计划数据")
-        refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
-        refresh_btn.clicked.connect(self._reload_current_plan)
-        filter_layout.addWidget(refresh_btn, 0, 6, 2, 1)
+        self._refresh_btn = QtWidgets.QPushButton("刷新计划数据")
+        self._refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        self._refresh_btn.clicked.connect(self._reload_current_plan)
+        filter_layout.addWidget(self._refresh_btn, 0, 6, 2, 1)
 
         filter_layout.setColumnStretch(1, 1)
         filter_layout.setColumnStretch(3, 1)
@@ -407,14 +409,7 @@ class MainWindow(QtWidgets.QMainWindow):
         monitor_layout = QtWidgets.QVBoxLayout(monitor_box)
         monitor_layout.setSpacing(12)
 
-        monitor_button_row = QtWidgets.QHBoxLayout()
         self._start_monitor_btn = QtWidgets.QPushButton("开始执行")
-        self._stop_monitor_btn = QtWidgets.QPushButton("停止")
-        self._stop_monitor_btn.setEnabled(False)
-        monitor_button_row.addWidget(self._start_monitor_btn)
-        monitor_button_row.addWidget(self._stop_monitor_btn)
-        monitor_button_row.addStretch()
-        monitor_layout.addLayout(monitor_button_row)
 
         monitor_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         keyword_widget = QtWidgets.QWidget()
@@ -446,6 +441,7 @@ class MainWindow(QtWidgets.QMainWindow):
         action_layout = QtWidgets.QHBoxLayout(action_frame)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(12)
+        action_layout.addWidget(self._start_monitor_btn)
         self._pass_btn = QtWidgets.QPushButton("标记通过")
         self._fail_btn = QtWidgets.QPushButton("标记失败")
         self._block_btn = QtWidgets.QPushButton("标记阻塞")
@@ -457,6 +453,9 @@ class MainWindow(QtWidgets.QMainWindow):
         action_layout.addWidget(self._block_btn)
         action_layout.addStretch()
         right_layout.addWidget(action_frame)
+
+        self._result_buttons = [self._pass_btn, self._fail_btn, self._block_btn]
+        self._set_action_buttons_mode(False)
 
         splitter.addWidget(right_widget)
         splitter.setStretchFactor(0, 2)
@@ -516,6 +515,52 @@ class MainWindow(QtWidgets.QMainWindow):
         return f"#{r:02X}{g:02X}{b:02X}"
 
     # ------------------------------------------------------------------
+    def _refresh_start_button_state(self) -> None:
+        enabled = bool(self._current_actions) and not self._execution_locked
+        self._start_monitor_btn.setEnabled(enabled)
+
+    def _set_action_buttons_mode(self, running: bool) -> None:
+        self._start_monitor_btn.setVisible(not running)
+        for button in self._result_buttons:
+            button.setVisible(running)
+        if running:
+            self._fail_btn.setEnabled(True)
+            self._block_btn.setEnabled(True)
+            self._update_pass_button_state()
+        else:
+            self._awaiting_monitor_completion_for_pass = False
+            for button in self._result_buttons:
+                button.setEnabled(False)
+            self._pass_btn.setToolTip("")
+            self._refresh_start_button_state()
+
+    def _update_pass_button_state(self) -> None:
+        if self._awaiting_monitor_completion_for_pass:
+            self._pass_btn.setEnabled(False)
+            self._pass_btn.setToolTip("时间监控进行中，计时完成后才能标记通过")
+        else:
+            self._pass_btn.setEnabled(True)
+            self._pass_btn.setToolTip("")
+
+    def _set_execution_lock(self, locked: bool) -> None:
+        if self._execution_locked == locked:
+            return
+        self._execution_locked = locked
+        widgets: Sequence[QtWidgets.QWidget] = [
+            self._department_combo,
+            self._project_combo,
+            self._plan_combo,
+            self._device_filter,
+            self._directory_filter,
+            self._result_filter,
+            self._refresh_btn,
+        ]
+        for widget in widgets:
+            widget.setEnabled(not locked)
+        self._case_tree.setDisabled(locked)
+        self._refresh_start_button_state()
+
+    # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
         self._department_combo.currentIndexChanged.connect(self._on_department_changed)
         self._project_combo.currentIndexChanged.connect(self._on_project_changed)
@@ -526,7 +571,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._case_tree.currentItemChanged.connect(self._on_case_selected)
 
         self._start_monitor_btn.clicked.connect(self._start_monitoring)
-        self._stop_monitor_btn.clicked.connect(self._stop_monitoring)
 
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
@@ -550,12 +594,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_monitoring_finished(self) -> None:
         self._append_log("监控已结束")
-        self._start_monitor_btn.setEnabled(True)
-        self._stop_monitor_btn.setEnabled(False)
+        if self._awaiting_monitor_completion_for_pass:
+            self._awaiting_monitor_completion_for_pass = False
+            if self._pass_btn.isVisible():
+                self._update_pass_button_state()
 
     def _on_monitoring_error(self, message: str) -> None:
         QtWidgets.QMessageBox.critical(self, "监控失败", message)
-        self._on_monitoring_finished()
+        self._set_action_buttons_mode(False)
+        self._set_execution_lock(False)
 
     # ------------------------------------------------------------------
     def _load_departments(self) -> None:
@@ -1020,6 +1067,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_actions = []
         self._current_device_id = entry.device_model_id if entry else None
         self._current_plan_device_model_id = entry.plan_device_model_id if entry else None
+        if not self._execution_locked:
+            self._set_action_buttons_mode(False)
         if not case:
             self._title_label.setText("请选择一条用例")
             self._precondition_view.clear()
@@ -1028,6 +1077,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._keyword_list.clear()
             self._keyword_error.setVisible(False)
             self._attachment_hint.clear()
+            self._refresh_start_button_state()
             return
 
         self._title_label.setText(self._case_display_text(entry))
@@ -1063,15 +1113,13 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValidationError as exc:
             self._keyword_error.setText(str(exc))
             self._keyword_error.setVisible(True)
-            self._start_monitor_btn.setEnabled(False)
             self._current_actions = []
         else:
             self._keyword_error.setVisible(False)
             self._current_actions = actions
             for action in actions:
                 self._keyword_list.addItem(f"{action.name} -> {action.amount}")
-            self._start_monitor_btn.setEnabled(bool(actions))
-        self._stop_monitor_btn.setEnabled(False)
+        self._refresh_start_button_state()
         self._log_view.clear()
         if require_attachment(self._current_actions):
             self._attachment_hint.setText("此用例包含时间监控，提交 PASS/FAIL 必须上传截图")
@@ -1086,20 +1134,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._current_actions:
             QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
             return
+        self._awaiting_monitor_completion_for_pass = any(
+            "时间" in action.name for action in self._current_actions
+        )
         start_time = dt.datetime.now().isoformat()
         self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
         self._append_log("监控已启动")
         self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
-        self._start_monitor_btn.setEnabled(False)
-        self._stop_monitor_btn.setEnabled(True)
-
-    def _stop_monitoring(self) -> None:
-        self._monitoring.stop()
-        self._append_log("监控停止请求已发送")
-        if self._current_case:
-            self._logger.info("已请求停止监控: 用例 %s", self._current_case.case_id)
-        self._start_monitor_btn.setEnabled(True)
-        self._stop_monitor_btn.setEnabled(False)
+        self._set_action_buttons_mode(True)
+        self._set_execution_lock(True)
 
     def _resolve_submission_device(
         self, entry: CaseDisplayEntry
@@ -1123,6 +1166,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self._current_entry:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
+            return
+        if result == "pass" and self._awaiting_monitor_completion_for_pass:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "计时未完成",
+                "时间监控尚未完成，暂不能标记通过。",
+            )
             return
         try:
             actions = parse_keywords(self._current_case.keyword_actions())
@@ -1154,6 +1204,10 @@ class MainWindow(QtWidgets.QMainWindow):
             {k: v for k, v in payload.items() if k != "local_path"}
             for payload in dialog.attachments()
         ]
+        if self._monitoring.is_running():
+            self._monitoring.stop()
+            self._append_log("监控停止请求已发送")
+        self._awaiting_monitor_completion_for_pass = False
         try:
             self._api.submit_result(
                 int(plan_id),
@@ -1177,6 +1231,8 @@ class MainWindow(QtWidgets.QMainWindow):
             plan_device_model_id,
         )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
+        self._set_action_buttons_mode(False)
+        self._set_execution_lock(False)
         self._reload_current_plan()
 
     def _reload_current_plan(self) -> None:
