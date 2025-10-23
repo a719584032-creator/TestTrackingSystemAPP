@@ -224,18 +224,58 @@ class PlanDetail:
 class CaseExecutionResult:
     """Represents a single execution run for a plan case."""
 
+    id: Optional[int]
+    plan_case_id: Optional[int]
+    plan_device_model_id: Optional[int]
+    device_model_id: Optional[int]
+    device_model_name: Optional[str]
+    device_model_code: Optional[str]
     result: str
     executed_at: Optional[str]
+    executed_by: Optional[int]
     executed_by_name: Optional[str]
+    remark: Optional[str]
+    failure_reason: Optional[str]
+    bug_ref: Optional[str]
+    run_id: Optional[int]
     duration_ms: Optional[int]
+    device_model: Optional[DeviceModel]
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "CaseExecutionResult":
+        device_payload = payload.get("device_model") or {}
+        if not device_payload and payload.get("device_model_id"):
+            device_payload = {
+                "id": payload.get("device_model_id"),
+                "name": payload.get("device_model_name"),
+                "model_code": payload.get("device_model_code"),
+            }
+
+        device = DeviceModel.from_dict(device_payload) if device_payload else None
+
         return cls(
+            id=payload.get("id"),
+            plan_case_id=payload.get("plan_case_id"),
+            plan_device_model_id=payload.get("plan_device_model_id"),
+            device_model_id=payload.get("device_model_id") or device.id if device else None,
+            device_model_name=payload.get("device_model_name")
+            or device_payload.get("name")
+            if device_payload
+            else None,
+            device_model_code=payload.get("device_model_code")
+            or device_payload.get("model_code")
+            if device_payload
+            else None,
             result=payload.get("result", "pending"),
             executed_at=payload.get("executed_at"),
+            executed_by=payload.get("executed_by"),
             executed_by_name=payload.get("executed_by_name"),
+            remark=payload.get("remark"),
+            failure_reason=payload.get("failure_reason"),
+            bug_ref=payload.get("bug_ref"),
+            run_id=payload.get("run_id"),
             duration_ms=payload.get("duration_ms"),
+            device_model=device,
         )
 
 
