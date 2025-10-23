@@ -37,6 +37,11 @@ PASS_SYMBOL_COLOR = "#16A34A"
 FAIL_SYMBOL_COLOR = "#DC2626"
 BLOCK_SYMBOL_COLOR = "#6B7280"
 
+STATUS_ICON_SIZE = 24
+
+_STATUS_ICON_CACHE: Dict[str, QtGui.QIcon] = {}
+_STATUS_ICON_PIXMAP_CACHE: Dict[str, QtGui.QPixmap] = {}
+
 
 @dataclass(slots=True)
 class CaseDisplayEntry:
@@ -367,10 +372,21 @@ class MainWindow(QtWidgets.QMainWindow):
         case_box = QtWidgets.QGroupBox("用例详情")
         case_layout = QtWidgets.QVBoxLayout(case_box)
         case_layout.setSpacing(10)
+
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.setSpacing(8)
+        self._title_icon_label = QtWidgets.QLabel()
+        self._title_icon_label.setFixedSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE)
+        self._title_icon_label.setScaledContents(True)
+        self._title_icon_label.setVisible(False)
+        title_row.addWidget(self._title_icon_label, 0, QtCore.Qt.AlignTop)
+
         self._title_label = QtWidgets.QLabel("请选择一条用例")
         self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
         self._title_label.setWordWrap(True)
-        case_layout.addWidget(self._title_label)
+        title_row.addWidget(self._title_label, 1)
+        title_row.addStretch()
+        case_layout.addLayout(title_row)
 
         self._precondition_title = QtWidgets.QLabel("前置条件")
         self._precondition_title.setStyleSheet("font-weight: 600;")
@@ -1005,6 +1021,9 @@ class MainWindow(QtWidgets.QMainWindow):
             result_color = self._status_color(entry)
             if result_color:
                 item.setForeground(0, QtGui.QBrush(QtGui.QColor(result_color)))
+            icon = self._status_icon(entry)
+            if icon:
+                item.setIcon(0, icon)
             keywords = case.display_keywords()
             if keywords:
                 item.setToolTip(0, f"关键字: {keywords}")
@@ -1051,19 +1070,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return ["未分组"]
         return normalized.split("/")
 
-    def _case_status_symbol(self, entry: CaseDisplayEntry) -> str:
-        result = entry.result_value()
-        mapping = {
-            "pass": "√",
-            "fail": "×",
-            "blocked": "⊘",
-            "block": "⊘",
-            "pending": "…",
-            "notrun": "…",
-            "skipped": "跳",
-        }
-        return mapping.get(result, "")
-
     def _status_color(self, entry: CaseDisplayEntry) -> Optional[str]:
         result = entry.result_value()
         if result == "pass":
@@ -1073,6 +1079,92 @@ class MainWindow(QtWidgets.QMainWindow):
         if result in {"blocked", "block"}:
             return BLOCK_SYMBOL_COLOR
         return None
+
+    def _status_icon(self, entry: CaseDisplayEntry) -> Optional[QtGui.QIcon]:
+        mapping = {
+            "pass": "pass",
+            "fail": "fail",
+            "blocked": "blocked",
+            "block": "blocked",
+        }
+        key = mapping.get(entry.result_value())
+        if not key:
+            return None
+        icon = _STATUS_ICON_CACHE.get(key)
+        if icon is None:
+            pixmap = self._status_icon_pixmap(key)
+            icon = QtGui.QIcon(pixmap)
+            _STATUS_ICON_CACHE[key] = icon
+        return icon
+
+    def _status_icon_pixmap(self, key: str) -> QtGui.QPixmap:
+        pixmap = _STATUS_ICON_PIXMAP_CACHE.get(key)
+        if pixmap is None:
+            pixmap = self._create_status_pixmap(key)
+            _STATUS_ICON_PIXMAP_CACHE[key] = pixmap
+        return pixmap
+
+    def _create_status_pixmap(self, key: str) -> QtGui.QPixmap:
+        size = STATUS_ICON_SIZE
+        pixmap = QtGui.QPixmap(size, size)
+        pixmap.fill(QtCore.Qt.transparent)
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        try:
+            if key == "pass":
+                self._draw_filled_circle(painter, QtGui.QColor(PASS_SYMBOL_COLOR), size)
+                self._draw_check_mark(painter, size)
+            elif key == "fail":
+                self._draw_filled_circle(painter, QtGui.QColor(FAIL_SYMBOL_COLOR), size)
+                self._draw_cross_mark(painter, size)
+            elif key == "blocked":
+                self._draw_block_sign(painter, QtGui.QColor(BLOCK_SYMBOL_COLOR), size)
+        finally:
+            painter.end()
+        return pixmap
+
+    @staticmethod
+    def _draw_filled_circle(painter: QtGui.QPainter, color: QtGui.QColor, size: int) -> None:
+        painter.setBrush(color)
+        painter.setPen(QtCore.Qt.NoPen)
+        inset = 1
+        rect = QtCore.QRectF(inset, inset, size - inset * 2, size - inset * 2)
+        painter.drawEllipse(rect)
+
+    @staticmethod
+    def _draw_check_mark(painter: QtGui.QPainter, size: int) -> None:
+        pen = QtGui.QPen(QtGui.QColor("#FFFFFF"))
+        pen.setWidthF(size * 0.18)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.RoundJoin)
+        painter.setPen(pen)
+        path = QtGui.QPainterPath()
+        path.moveTo(size * 0.28, size * 0.55)
+        path.lineTo(size * 0.45, size * 0.72)
+        path.lineTo(size * 0.76, size * 0.30)
+        painter.drawPath(path)
+
+    @staticmethod
+    def _draw_cross_mark(painter: QtGui.QPainter, size: int) -> None:
+        pen = QtGui.QPen(QtGui.QColor("#FFFFFF"))
+        pen.setWidthF(size * 0.18)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(QtCore.QPointF(size * 0.32, size * 0.32), QtCore.QPointF(size * 0.72, size * 0.72))
+        painter.drawLine(QtCore.QPointF(size * 0.72, size * 0.32), QtCore.QPointF(size * 0.32, size * 0.72))
+
+    @staticmethod
+    def _draw_block_sign(painter: QtGui.QPainter, color: QtGui.QColor, size: int) -> None:
+        pen = QtGui.QPen(color)
+        pen.setWidthF(size * 0.18)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.NoBrush)
+        inset = pen.widthF() / 2 + 1
+        rect = QtCore.QRectF(inset, inset, size - inset * 2, size - inset * 2)
+        painter.drawEllipse(rect)
+        painter.drawLine(QtCore.QPointF(size * 0.28, size * 0.28), QtCore.QPointF(size * 0.72, size * 0.72))
 
     def _selection_key(
         self, entry: Optional[CaseDisplayEntry]
@@ -1094,12 +1186,9 @@ class MainWindow(QtWidgets.QMainWindow):
             plan_device_id = int(plan_device_id)
         return (case_identifier, device_id, plan_device_id, entry.is_general)
 
-    def _case_display_text(self, entry: CaseDisplayEntry, include_status: bool = True) -> str:
+    def _case_display_text(self, entry: CaseDisplayEntry) -> str:
         case = entry.case
         parts: List[str] = []
-        status = self._case_status_symbol(entry) if include_status else ""
-        if status:
-            parts.append(status)
         title = (case.title or "").strip() or f"用例 {case.case_id}"
         parts.append(title)
         device_hint = entry.device_label.strip()
@@ -1137,6 +1226,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_action_buttons_mode(False)
         if not case:
             self._title_label.setText("请选择一条用例")
+            self._title_icon_label.clear()
+            self._title_icon_label.setVisible(False)
             self._precondition_view.clear()
             self._steps_view.clear()
             self._expected_view.clear()
@@ -1147,6 +1238,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self._title_label.setText(self._case_display_text(entry))
+        icon = self._status_icon(entry)
+        if icon:
+            pixmap = icon.pixmap(STATUS_ICON_SIZE, STATUS_ICON_SIZE)
+            self._title_icon_label.setPixmap(pixmap)
+            self._title_icon_label.setVisible(True)
+        else:
+            self._title_icon_label.clear()
+            self._title_icon_label.setVisible(False)
 
         preconditions = (case.preconditions or "").strip()
         self._precondition_view.setPlainText(preconditions or "暂无前置条件")
@@ -1252,7 +1351,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ResultDialog(
             self,
             {"pass": "通过", "fail": "失败", "blocked": "阻塞"}.get(result, result.upper()),
-            self._case_display_text(self._current_entry, include_status=False),
+            self._case_display_text(self._current_entry),
             device_hint,
             need_attachment,
         )
