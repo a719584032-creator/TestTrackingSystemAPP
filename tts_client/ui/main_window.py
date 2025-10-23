@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -14,6 +14,143 @@ from ..core.models import Department, PlanCase, PlanDetail, Project, TestPlan
 from ..core.monitor_parser import MonitoringAction, parse_keywords, require_attachment
 from ..core.settings import WindowStateStore
 from ..monitoring.manager import MonitoringManager
+
+
+STATUS_COLORS = {
+    "未开始": "#6B7280",
+    "进行中": "#10B981",
+    "挂起": "#F59E0B",
+    "已完成": "#2563EB",
+}
+
+DEFAULT_STATUS_COLOR = "#6B7280"
+
+
+class ResultDialog(QtWidgets.QDialog):
+    """Dialog used to collect execution metadata before submitting results."""
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget,
+        result_label: str,
+        case_title: str,
+        device_options: Sequence[Tuple[str, Optional[int]]],
+        require_attachment: bool,
+    ) -> None:
+        super().__init__(parent)
+        self._require_attachment = require_attachment
+        self._attachments: List[Dict[str, str]] = []
+
+        self.setWindowTitle(f"提交结果 - {result_label}")
+        self.resize(520, 480)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QLabel(f"当前用例：{case_title}")
+        header.setWordWrap(True)
+        header.setStyleSheet("font-weight: 600; font-size: 14px;")
+        layout.addWidget(header)
+
+        form = QtWidgets.QFormLayout()
+        self._remark_edit = QtWidgets.QPlainTextEdit()
+        self._remark_edit.setPlaceholderText("执行备注，可记录关键步骤或说明。")
+        self._remark_edit.setFixedHeight(100)
+        form.addRow("备注", self._remark_edit)
+
+        self._failure_edit = QtWidgets.QLineEdit()
+        self._failure_edit.setPlaceholderText("失败原因（可选）")
+        form.addRow("失败原因", self._failure_edit)
+
+        self._bug_edit = QtWidgets.QLineEdit()
+        self._bug_edit.setPlaceholderText("缺陷编号（可选）")
+        form.addRow("缺陷编号", self._bug_edit)
+
+        self._device_combo = QtWidgets.QComboBox()
+        for label, value in device_options:
+            self._device_combo.addItem(label, value)
+        form.addRow("执行设备", self._device_combo)
+        layout.addLayout(form)
+
+        attachment_box = QtWidgets.QGroupBox("截图 / 附件")
+        attachment_layout = QtWidgets.QVBoxLayout(attachment_box)
+        self._attachment_list = QtWidgets.QListWidget()
+        attachment_layout.addWidget(self._attachment_list)
+        btn_row = QtWidgets.QHBoxLayout()
+        self._add_attachment_btn = QtWidgets.QPushButton("添加图片")
+        self._remove_attachment_btn = QtWidgets.QPushButton("移除选中")
+        btn_row.addWidget(self._add_attachment_btn)
+        btn_row.addWidget(self._remove_attachment_btn)
+        btn_row.addStretch()
+        attachment_layout.addLayout(btn_row)
+        layout.addWidget(attachment_box)
+
+        if self._require_attachment:
+            hint = QtWidgets.QLabel("该结果需要至少上传一张截图作为佐证。")
+            hint.setStyleSheet("color: #2563eb;")
+            layout.addWidget(hint)
+
+        layout.addStretch()
+
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self._add_attachment_btn.clicked.connect(self._add_attachment)
+        self._remove_attachment_btn.clicked.connect(self._remove_attachment)
+
+    # ------------------------------------------------------------------
+    def _add_attachment(self) -> None:
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "选择图片",
+            os.path.expanduser("~"),
+            "Images (*.png *.jpg *.jpeg *.bmp)",
+        )
+        for path in files:
+            try:
+                payload = encode_attachment(path)
+            except OSError as exc:  # pragma: no cover - file IO
+                QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
+                continue
+            payload["local_path"] = path
+            self._attachments.append(payload)
+            self._attachment_list.addItem(os.path.basename(path))
+
+    def _remove_attachment(self) -> None:
+        row = self._attachment_list.currentRow()
+        if row < 0 or row >= len(self._attachments):
+            return
+        self._attachment_list.takeItem(row)
+        self._attachments.pop(row)
+
+    # ------------------------------------------------------------------
+    def attachments(self) -> List[Dict[str, str]]:
+        return list(self._attachments)
+
+    def remark(self) -> str:
+        return self._remark_edit.toPlainText().strip()
+
+    def failure_reason(self) -> Optional[str]:
+        value = self._failure_edit.text().strip()
+        return value or None
+
+    def bug_ref(self) -> Optional[str]:
+        value = self._bug_edit.text().strip()
+        return value or None
+
+    def selected_device(self) -> Optional[int]:
+        data = self._device_combo.currentData()
+        return int(data) if data is not None else None
+
+    # ------------------------------------------------------------------
+    def accept(self) -> None:  # noqa: D401 - inherited docstring
+        if self._require_attachment and not self._attachments:
+            QtWidgets.QMessageBox.warning(self, "缺少附件", "请至少上传一张截图后再提交。")
+            return
+        super().accept()
+
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -40,8 +177,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._filtered_cases: List[PlanCase] = []
         self._current_case: Optional[PlanCase] = None
         self._current_actions: List[MonitoringAction] = []
-        self._attachments: List[Dict[str, str]] = []
         self._plan_detail: Optional[PlanDetail] = None
+        self._current_device_options: List[Tuple[str, Optional[int]]] = []
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -53,215 +190,296 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
-        toolbar = QtWidgets.QToolBar()
-        toolbar.setIconSize(QtCore.QSize(20, 20))
-        toolbar.setMovable(False)
-        toolbar.addWidget(QtWidgets.QLabel("部门:"))
-        self._department_combo = QtWidgets.QComboBox()
-        self._department_combo.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
-        self._department_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._department_combo.setMinimumContentsLength(8)
-        toolbar.addWidget(self._department_combo)
-        toolbar.addSeparator()
-        toolbar.addWidget(QtWidgets.QLabel("项目:"))
-        self._project_combo = QtWidgets.QComboBox()
-        self._project_combo.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
-        self._project_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._project_combo.setMinimumContentsLength(8)
-        toolbar.addWidget(self._project_combo)
-        toolbar.addSeparator()
-        toolbar.addWidget(QtWidgets.QLabel("计划:"))
-        self._plan_combo = QtWidgets.QComboBox()
-        self._plan_combo.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
-        self._plan_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._plan_combo.setMinimumContentsLength(8)
-        toolbar.addWidget(self._plan_combo)
-        toolbar.addSeparator()
-        toolbar.addWidget(QtWidgets.QLabel("机型:"))
-        self._device_filter = QtWidgets.QComboBox()
-        self._device_filter.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
-        self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._device_filter.setMinimumContentsLength(8)
-        toolbar.addWidget(self._device_filter)
-        toolbar.addSeparator()
-        refresh_action = QtWidgets.QAction("刷新", self)
-        refresh_action.triggered.connect(self._reload_current_plan)
-        toolbar.addAction(refresh_action)
-        self.addToolBar(toolbar)
-
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-        root_layout = QtWidgets.QHBoxLayout(central)
-        root_layout.setContentsMargins(12, 12, 12, 12)
-        root_layout.setSpacing(12)
 
-        # Left: table and filters
-        left_panel = QtWidgets.QVBoxLayout()
-        left_panel.setSpacing(10)
+        root_layout = QtWidgets.QVBoxLayout(central)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+        root_layout.setSpacing(16)
 
-        filter_box = QtWidgets.QGroupBox("筛选")
+        # ------------------------------------------------------------------
+        # Context selection area
+        context_box = QtWidgets.QGroupBox("执行上下文")
+        context_layout = QtWidgets.QGridLayout(context_box)
+        context_layout.setHorizontalSpacing(12)
+        context_layout.setVerticalSpacing(10)
+
+        context_layout.addWidget(QtWidgets.QLabel("部门"), 0, 0)
+        self._department_combo = QtWidgets.QComboBox()
+        self._department_combo.setMinimumWidth(180)
+        self._department_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        context_layout.addWidget(self._department_combo, 0, 1)
+
+        context_layout.addWidget(QtWidgets.QLabel("项目"), 0, 2)
+        self._project_combo = QtWidgets.QComboBox()
+        self._project_combo.setMinimumWidth(200)
+        self._project_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        context_layout.addWidget(self._project_combo, 0, 3)
+
+        context_layout.addWidget(QtWidgets.QLabel("计划"), 1, 0)
+        self._plan_combo = QtWidgets.QComboBox()
+        self._plan_combo.setMinimumWidth(200)
+        self._plan_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        context_layout.addWidget(self._plan_combo, 1, 1)
+
+        context_layout.addWidget(QtWidgets.QLabel("执行机型"), 1, 2)
+        self._device_filter = QtWidgets.QComboBox()
+        self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._device_filter.setMinimumWidth(200)
+        context_layout.addWidget(self._device_filter, 1, 3)
+
+        refresh_btn = QtWidgets.QPushButton("刷新计划数据")
+        refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        refresh_btn.clicked.connect(self._reload_current_plan)
+        context_layout.addWidget(refresh_btn, 0, 4, 2, 1)
+
+        context_layout.setColumnStretch(1, 1)
+        context_layout.setColumnStretch(3, 1)
+        root_layout.addWidget(context_box)
+
+        # ------------------------------------------------------------------
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        root_layout.addWidget(splitter, stretch=1)
+
+        # Left panel: filters and case tree
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        left_layout.setSpacing(12)
+
+        filter_box = QtWidgets.QGroupBox("用例筛选")
         filter_layout = QtWidgets.QGridLayout(filter_box)
         filter_layout.setHorizontalSpacing(12)
+        filter_layout.setVerticalSpacing(8)
         filter_layout.addWidget(QtWidgets.QLabel("目录"), 0, 0)
         self._directory_filter = QtWidgets.QComboBox()
-        self._directory_filter.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
         self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._directory_filter.setMinimumContentsLength(8)
         self._directory_filter.addItem("全部", None)
         filter_layout.addWidget(self._directory_filter, 0, 1)
 
         filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 0)
         self._result_filter = QtWidgets.QComboBox()
-        self._result_filter.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-        )
         self._result_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._result_filter.setMinimumContentsLength(8)
         self._result_filter.addItem("全部", None)
         for value in ["pass", "fail", "blocked", "pending", "skipped"]:
             self._result_filter.addItem(value, value)
         filter_layout.addWidget(self._result_filter, 1, 1)
         filter_layout.setColumnStretch(1, 1)
-
-        left_panel.addWidget(filter_box)
+        left_layout.addWidget(filter_box)
 
         self._case_tree = QtWidgets.QTreeWidget()
-        self._case_tree.setHeaderLabels(["用例标题"])
+        self._case_tree.setHeaderLabels(["测试用例"])
         self._case_tree.header().setStretchLastSection(True)
         self._case_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._case_tree.setIndentation(18)
         self._case_tree.setUniformRowHeights(True)
-        left_panel.addWidget(self._case_tree, stretch=1)
+        left_layout.addWidget(self._case_tree, stretch=1)
 
-        root_layout.addLayout(left_panel, stretch=3)
+        splitter.addWidget(left_widget)
 
-        # Right: detail and monitoring panel
-        detail_panel = QtWidgets.QVBoxLayout()
-        detail_panel.setSpacing(10)
+        # Right panel: plan overview, case detail, monitoring
+        right_widget = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_widget)
+        right_layout.setSpacing(12)
 
-        plan_box = QtWidgets.QGroupBox("计划概览")
+        plan_box = QtWidgets.QGroupBox("计划总览")
         plan_layout = QtWidgets.QGridLayout(plan_box)
-        plan_layout.setVerticalSpacing(6)
-        plan_layout.addWidget(QtWidgets.QLabel("状态"), 0, 0)
-        self._plan_status_label = QtWidgets.QLabel("-")
-        plan_layout.addWidget(self._plan_status_label, 0, 1)
-        plan_layout.addWidget(QtWidgets.QLabel("时间周期"), 1, 0)
-        self._plan_period_label = QtWidgets.QLabel("-")
-        self._plan_period_label.setWordWrap(True)
-        plan_layout.addWidget(self._plan_period_label, 1, 1)
-        plan_layout.addWidget(QtWidgets.QLabel("测试人员"), 2, 0)
-        self._plan_tester_label = QtWidgets.QLabel("-")
-        self._plan_tester_label.setWordWrap(True)
-        plan_layout.addWidget(self._plan_tester_label, 2, 1)
-        plan_layout.addWidget(QtWidgets.QLabel("执行统计"), 3, 0)
-        self._plan_stats_label = QtWidgets.QLabel("-")
-        self._plan_stats_label.setWordWrap(True)
-        plan_layout.addWidget(self._plan_stats_label, 3, 1)
-        plan_layout.setColumnStretch(1, 1)
-        detail_panel.addWidget(plan_box)
+        plan_layout.setHorizontalSpacing(12)
+        plan_layout.setVerticalSpacing(8)
 
+        plan_layout.addWidget(QtWidgets.QLabel("计划状态"), 0, 0)
+        self._plan_status_label = QtWidgets.QLabel("未选择")
+        self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
+        self._plan_status_label.setFixedHeight(24)
+        self._apply_status_style(DEFAULT_STATUS_COLOR)
+        plan_layout.addWidget(self._plan_status_label, 0, 1)
+
+        plan_layout.addWidget(QtWidgets.QLabel("时间周期"), 0, 2)
+        self._plan_period_label = QtWidgets.QLabel("—")
+        self._plan_period_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_period_label, 0, 3)
+
+        plan_layout.addWidget(QtWidgets.QLabel("测试人员"), 1, 0)
+        self._plan_tester_label = QtWidgets.QLabel("—")
+        self._plan_tester_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_tester_label, 1, 1, 1, 3)
+
+        stats_row = QtWidgets.QHBoxLayout()
+        stats_row.setSpacing(10)
+        self._plan_stat_labels: Dict[str, Tuple[QtWidgets.QLabel, str]] = {}
+        stat_configs = [
+            ("total", "总数", "#EEF2FF", "#1E3A8A"),
+            ("executed", "已执行", "#ECFEFF", "#155E75"),
+            ("pass", "通过", "#DCFCE7", "#047857"),
+            ("fail", "失败", "#FEE2E2", "#B91C1C"),
+            ("block", "阻塞", "#FEF3C7", "#B45309"),
+            ("notrun", "未执行", "#E5E7EB", "#374151"),
+        ]
+        for key, title, bg, fg in stat_configs:
+            pill = QtWidgets.QLabel(f"{title}\n0")
+            pill.setAlignment(QtCore.Qt.AlignCenter)
+            pill.setWordWrap(True)
+            pill.setMinimumWidth(82)
+            pill.setStyleSheet(
+                f"""
+                QLabel {{
+                    background-color: {bg};
+                    color: {fg};
+                    border-radius: 12px;
+                    padding: 6px 10px;
+                    font-weight: 600;
+                }}
+                """
+            )
+            stats_row.addWidget(pill)
+            self._plan_stat_labels[key] = (pill, title)
+        stats_row.addStretch()
+        plan_layout.addLayout(stats_row, 2, 0, 1, 4)
+
+        right_layout.addWidget(plan_box)
+
+        case_box = QtWidgets.QGroupBox("用例信息")
+        case_layout = QtWidgets.QVBoxLayout(case_box)
         self._title_label = QtWidgets.QLabel("请选择一条用例")
         self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
-        detail_panel.addWidget(self._title_label)
+        case_layout.addWidget(self._title_label)
 
-        info_layout = QtWidgets.QGridLayout()
+        info_grid = QtWidgets.QGridLayout()
+        info_grid.setHorizontalSpacing(12)
+        info_grid.setVerticalSpacing(6)
         self._priority_label = QtWidgets.QLabel("-")
         self._result_label = QtWidgets.QLabel("-")
         self._directory_label = QtWidgets.QLabel("-")
-        info_layout.addWidget(QtWidgets.QLabel("优先级"), 0, 0)
-        info_layout.addWidget(self._priority_label, 0, 1)
-        info_layout.addWidget(QtWidgets.QLabel("最新结果"), 0, 2)
-        info_layout.addWidget(self._result_label, 0, 3)
-        info_layout.addWidget(QtWidgets.QLabel("目录"), 1, 0)
-        info_layout.addWidget(self._directory_label, 1, 1, 1, 3)
-        detail_panel.addLayout(info_layout)
+        self._device_label = QtWidgets.QLabel("-")
+        self._directory_label.setWordWrap(True)
+        self._device_label.setWordWrap(True)
 
-        keyword_box = QtWidgets.QGroupBox("监控动作")
-        keyword_layout = QtWidgets.QVBoxLayout(keyword_box)
-        self._keyword_list = QtWidgets.QListWidget()
-        keyword_layout.addWidget(self._keyword_list)
-        self._keyword_error = QtWidgets.QLabel()
-        self._keyword_error.setStyleSheet("color: #dc2626;")
-        self._keyword_error.setVisible(False)
-        keyword_layout.addWidget(self._keyword_error)
-        detail_panel.addWidget(keyword_box)
+        info_grid.addWidget(QtWidgets.QLabel("优先级"), 0, 0)
+        info_grid.addWidget(self._priority_label, 0, 1)
+        info_grid.addWidget(QtWidgets.QLabel("最新结果"), 0, 2)
+        info_grid.addWidget(self._result_label, 0, 3)
+        info_grid.addWidget(QtWidgets.QLabel("所属目录"), 1, 0)
+        info_grid.addWidget(self._directory_label, 1, 1, 1, 3)
+        info_grid.addWidget(QtWidgets.QLabel("关联机型"), 2, 0)
+        info_grid.addWidget(self._device_label, 2, 1, 1, 3)
+        case_layout.addLayout(info_grid)
 
-        monitoring_box = QtWidgets.QGroupBox("监控执行")
-        monitoring_layout = QtWidgets.QVBoxLayout(monitoring_box)
+        self._attachment_hint = QtWidgets.QLabel("")
+        self._attachment_hint.setStyleSheet("color: #2563eb;")
+        case_layout.addWidget(self._attachment_hint)
+
+        right_layout.addWidget(case_box)
+
+        monitor_box = QtWidgets.QGroupBox("监控执行")
+        monitor_layout = QtWidgets.QVBoxLayout(monitor_box)
+        monitor_layout.setSpacing(12)
+
         monitor_button_row = QtWidgets.QHBoxLayout()
         self._start_monitor_btn = QtWidgets.QPushButton("开始监控")
         self._stop_monitor_btn = QtWidgets.QPushButton("停止")
         self._stop_monitor_btn.setEnabled(False)
         monitor_button_row.addWidget(self._start_monitor_btn)
         monitor_button_row.addWidget(self._stop_monitor_btn)
-        monitoring_layout.addLayout(monitor_button_row)
+        monitor_button_row.addStretch()
+        monitor_layout.addLayout(monitor_button_row)
 
+        monitor_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        keyword_widget = QtWidgets.QWidget()
+        keyword_layout = QtWidgets.QVBoxLayout(keyword_widget)
+        keyword_layout.setContentsMargins(0, 0, 0, 0)
+        keyword_layout.setSpacing(6)
+        self._keyword_list = QtWidgets.QListWidget()
+        keyword_layout.addWidget(self._keyword_list)
+        self._keyword_error = QtWidgets.QLabel()
+        self._keyword_error.setStyleSheet("color: #dc2626;")
+        self._keyword_error.setVisible(False)
+        keyword_layout.addWidget(self._keyword_error)
+        monitor_splitter.addWidget(keyword_widget)
+
+        log_widget = QtWidgets.QWidget()
+        log_layout = QtWidgets.QVBoxLayout(log_widget)
+        log_layout.setContentsMargins(0, 0, 0, 0)
         self._log_view = QtWidgets.QPlainTextEdit()
         self._log_view.setReadOnly(True)
-        monitoring_layout.addWidget(self._log_view)
-        detail_panel.addWidget(monitoring_box, stretch=1)
+        log_layout.addWidget(self._log_view)
+        monitor_splitter.addWidget(log_widget)
+        monitor_splitter.setStretchFactor(0, 1)
+        monitor_splitter.setStretchFactor(1, 2)
+        monitor_layout.addWidget(monitor_splitter)
 
-        execution_box = QtWidgets.QGroupBox("结果记录")
-        execution_layout = QtWidgets.QGridLayout(execution_box)
-        execution_layout.addWidget(QtWidgets.QLabel("备注"), 0, 0)
-        self._remark_edit = QtWidgets.QPlainTextEdit()
-        execution_layout.addWidget(self._remark_edit, 0, 1, 1, 3)
+        right_layout.addWidget(monitor_box, stretch=1)
 
-        execution_layout.addWidget(QtWidgets.QLabel("失败原因"), 1, 0)
-        self._failure_edit = QtWidgets.QLineEdit()
-        execution_layout.addWidget(self._failure_edit, 1, 1, 1, 3)
-
-        execution_layout.addWidget(QtWidgets.QLabel("缺陷编号"), 2, 0)
-        self._bug_edit = QtWidgets.QLineEdit()
-        execution_layout.addWidget(self._bug_edit, 2, 1)
-
-        execution_layout.addWidget(QtWidgets.QLabel("设备"), 2, 2)
-        self._device_combo = QtWidgets.QComboBox()
-        execution_layout.addWidget(self._device_combo, 2, 3)
-
-        attachment_row = QtWidgets.QHBoxLayout()
-        self._attachment_list = QtWidgets.QListWidget()
-        attachment_row.addWidget(self._attachment_list, stretch=1)
-        attach_controls = QtWidgets.QVBoxLayout()
-        self._add_attachment_btn = QtWidgets.QPushButton("添加图片")
-        self._remove_attachment_btn = QtWidgets.QPushButton("移除")
-        attach_controls.addWidget(self._add_attachment_btn)
-        attach_controls.addWidget(self._remove_attachment_btn)
-        attach_controls.addStretch()
-        attachment_row.addLayout(attach_controls)
-        execution_layout.addLayout(attachment_row, 3, 0, 1, 4)
-
-        button_row = QtWidgets.QHBoxLayout()
+        action_frame = QtWidgets.QFrame()
+        action_layout = QtWidgets.QHBoxLayout(action_frame)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(12)
         self._pass_btn = QtWidgets.QPushButton("标记通过")
         self._fail_btn = QtWidgets.QPushButton("标记失败")
         self._block_btn = QtWidgets.QPushButton("标记阻塞")
-        button_row.addWidget(self._pass_btn)
-        button_row.addWidget(self._fail_btn)
-        button_row.addWidget(self._block_btn)
-        execution_layout.addLayout(button_row, 4, 0, 1, 4)
+        self._style_action_button(self._pass_btn, "#10B981")
+        self._style_action_button(self._fail_btn, "#EF4444")
+        self._style_action_button(self._block_btn, "#F59E0B")
+        action_layout.addWidget(self._pass_btn)
+        action_layout.addWidget(self._fail_btn)
+        action_layout.addWidget(self._block_btn)
+        action_layout.addStretch()
+        right_layout.addWidget(action_frame)
 
-        self._attachment_hint = QtWidgets.QLabel("")
-        self._attachment_hint.setStyleSheet("color: #2563eb;")
-        execution_layout.addWidget(self._attachment_hint, 5, 0, 1, 4)
-
-        detail_panel.addWidget(execution_box)
-        root_layout.addLayout(detail_panel, stretch=4)
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
 
         # Status bar
         status = QtWidgets.QStatusBar()
         self.setStatusBar(status)
         user_name = self._user.get("real_name") or self._user.get("username", "未登录")
         status.showMessage(f"当前用户: {user_name}")
+
+    # ------------------------------------------------------------------
+    def _apply_status_style(self, color: str) -> None:
+        self._plan_status_label.setStyleSheet(
+            f"""
+            QLabel {{
+                background-color: {color}22;
+                color: {color};
+                border: 1px solid {color};
+                border-radius: 12px;
+                padding: 0 10px;
+                font-weight: 600;
+            }}
+            """
+        )
+
+    def _style_action_button(self, button: QtWidgets.QPushButton, color: str) -> None:
+        hover_color = self._tint_color(color, 1.1)
+        button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+            }}
+            QPushButton:disabled {{
+                background-color: #9CA3AF;
+                color: #F9FAFB;
+            }}
+            """
+        )
+
+    @staticmethod
+    def _tint_color(color: str, factor: float) -> str:
+        hex_value = color.lstrip("#")
+        if len(hex_value) != 6:
+            return color
+        r = min(255, int(int(hex_value[0:2], 16) * factor))
+        g = min(255, int(int(hex_value[2:4], 16) * factor))
+        b = min(255, int(int(hex_value[4:6], 16) * factor))
+        return f"#{r:02X}{g:02X}{b:02X}"
 
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
@@ -275,9 +493,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._start_monitor_btn.clicked.connect(self._start_monitoring)
         self._stop_monitor_btn.clicked.connect(self._stop_monitoring)
-
-        self._add_attachment_btn.clicked.connect(self._add_attachment)
-        self._remove_attachment_btn.clicked.connect(self._remove_attachment)
 
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
@@ -476,10 +691,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_plan_summary(self) -> None:
         detail = self._plan_detail
         if not detail:
-            self._plan_status_label.setText("-")
-            self._plan_period_label.setText("-")
-            self._plan_tester_label.setText("-")
-            self._plan_stats_label.setText("-")
+            self._plan_status_label.setText("未选择")
+            self._apply_status_style(DEFAULT_STATUS_COLOR)
+            self._plan_period_label.setText("—")
+            self._plan_tester_label.setText("—")
+            for key, (label, title) in self._plan_stat_labels.items():
+                label.setText(f"{title}\n0")
             return
 
         if detail.start_date and detail.end_date:
@@ -492,26 +709,35 @@ class MainWindow(QtWidgets.QMainWindow):
             period = "-"
 
         testers = "、".join(detail.tester_names()) or "未分配"
-        if detail.statistics:
-            stats = detail.statistics
-            stats_parts = [
-                f"总数 {stats.total_results}",
-                f"已执行 {stats.executed_results}",
-                f"通过 {stats.passed}",
-                f"失败 {stats.failed}",
-                f"阻塞 {stats.blocked}",
-                f"未执行 {stats.not_run}",
-            ]
-            if stats.skipped:
-                stats_parts.append(f"跳过 {stats.skipped}")
-            stats_text = " · ".join(stats_parts)
-        else:
-            stats_text = "暂无统计数据"
-
-        self._plan_status_label.setText(detail.status or "-")
+        status_text = detail.status or "未开始"
+        self._plan_status_label.setText(status_text)
+        self._apply_status_style(STATUS_COLORS.get(status_text, DEFAULT_STATUS_COLOR))
         self._plan_period_label.setText(period)
         self._plan_tester_label.setText(testers)
-        self._plan_stats_label.setText(stats_text)
+
+        stats_values = {
+            "total": 0,
+            "executed": 0,
+            "pass": 0,
+            "fail": 0,
+            "block": 0,
+            "notrun": 0,
+        }
+        if detail.statistics:
+            stats = detail.statistics
+            stats_values.update(
+                {
+                    "total": stats.total_results,
+                    "executed": stats.executed_results,
+                    "pass": stats.passed,
+                    "fail": stats.failed,
+                    "block": stats.blocked,
+                    "notrun": stats.not_run,
+                }
+            )
+
+        for key, (label, title) in self._plan_stat_labels.items():
+            label.setText(f"{title}\n{stats_values.get(key, 0)}")
 
     def _refresh_case_tree(self) -> None:
         self._case_tree.blockSignals(True)
@@ -593,13 +819,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_case_detail(self, case: Optional[PlanCase]) -> None:
         self._current_case = case
         self._current_actions = []
-        self._attachments.clear()
-        self._attachment_list.clear()
+        self._current_device_options = [("(未指定)", None)]
         if not case:
             self._title_label.setText("请选择一条用例")
             self._priority_label.setText("-")
             self._result_label.setText("-")
             self._directory_label.setText("-")
+            self._device_label.setText("-")
             self._keyword_list.clear()
             self._keyword_error.setVisible(False)
             self._attachment_hint.clear()
@@ -609,10 +835,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._priority_label.setText(case.priority or "-")
         self._result_label.setText(case.latest_result or "pending")
         self._directory_label.setText(self._normalize_directory(case.group_path))
-        self._device_combo.clear()
-        self._device_combo.addItem("(未指定)", userData=None)
+        device_names: List[str] = []
         for model in case.device_models:
-            self._device_combo.addItem(model.name or model.model_code or str(model.id), model.id)
+            label = model.name or model.model_code or str(model.id)
+            device_names.append(label)
+            self._current_device_options.append((label, model.id))
+        if device_names:
+            self._device_label.setText("、".join(device_names))
+        else:
+            self._device_label.setText("未关联设备")
 
         self._keyword_list.clear()
         try:
@@ -658,34 +889,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_monitor_btn.setEnabled(True)
         self._stop_monitor_btn.setEnabled(False)
 
-    # ------------------------------------------------------------------
-    def _add_attachment(self) -> None:
-        if not self._current_case:
-            return
-        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self,
-            "选择图片",
-            os.path.expanduser("~"),
-            "Images (*.png *.jpg *.jpeg *.bmp)"
-        )
-        for path in files:
-            try:
-                payload = encode_attachment(path)
-            except OSError as exc:  # pragma: no cover - file IO
-                QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
-                continue
-            payload["local_path"] = path
-            self._attachments.append(payload)
-            self._attachment_list.addItem(os.path.basename(path))
-
-    def _remove_attachment(self) -> None:
-        row = self._attachment_list.currentRow()
-        if row < 0 or row >= len(self._attachments):
-            return
-        self._attachment_list.takeItem(row)
-        self._attachments.pop(row)
-
-    # ------------------------------------------------------------------
     def _submit_result(self, result: str) -> None:
         if not self._current_case:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
@@ -695,18 +898,29 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValidationError as exc:
             QtWidgets.QMessageBox.warning(self, "关键字错误", str(exc))
             return
-        if result in {"pass", "fail"} and require_attachment(actions) and not self._attachments:
-            QtWidgets.QMessageBox.warning(self, "缺少附件", "包含时间监控的用例必须上传截图")
+        need_attachment = result in {"pass", "fail"} and require_attachment(actions)
+        dialog = ResultDialog(
+            self,
+            {"pass": "通过", "fail": "失败", "blocked": "阻塞"}.get(result, result.upper()),
+            self._current_case.title,
+            self._current_device_options,
+            need_attachment,
+        )
+        if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
         plan_id = self._plan_combo.currentData()
         plan_case_id = self._current_case.id
-        remark = self._remark_edit.toPlainText().strip()
-        failure_reason = self._failure_edit.text().strip() or None
-        bug_ref = self._bug_edit.text().strip() or None
-        device_model_id = self._device_combo.currentData()
-        if device_model_id is None:
-            device_model_id = None
-        attachments = [{k: v for k, v in payload.items() if k != "local_path"} for payload in self._attachments]
+        if plan_id is None or plan_case_id is None:
+            QtWidgets.QMessageBox.warning(self, "提交失败", "当前计划信息缺失，请刷新后重试。")
+            return
+        remark = dialog.remark()
+        failure_reason = dialog.failure_reason()
+        bug_ref = dialog.bug_ref()
+        device_model_id = dialog.selected_device()
+        attachments = [
+            {k: v for k, v in payload.items() if k != "local_path"}
+            for payload in dialog.attachments()
+        ]
         try:
             self._api.submit_result(
                 int(plan_id),
@@ -728,11 +942,6 @@ class MainWindow(QtWidgets.QMainWindow):
             device_model_id,
         )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
-        self._remark_edit.clear()
-        self._failure_edit.clear()
-        self._bug_edit.clear()
-        self._attachments.clear()
-        self._attachment_list.clear()
         self._reload_current_plan()
 
     def _reload_current_plan(self) -> None:
