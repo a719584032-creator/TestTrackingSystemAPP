@@ -280,29 +280,6 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.setColumnStretch(5, 1)
         root_layout.addWidget(filter_box)
 
-        # ------------------------------------------------------------------
-        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        root_layout.addWidget(splitter, stretch=1)
-
-        # Left panel: filters and case tree
-        left_widget = QtWidgets.QWidget()
-        left_layout = QtWidgets.QVBoxLayout(left_widget)
-        left_layout.setSpacing(12)
-        self._case_tree = QtWidgets.QTreeWidget()
-        self._case_tree.setHeaderLabels(["测试用例"])
-        self._case_tree.header().setStretchLastSection(True)
-        self._case_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self._case_tree.setIndentation(18)
-        self._case_tree.setUniformRowHeights(True)
-        left_layout.addWidget(self._case_tree, stretch=1)
-
-        splitter.addWidget(left_widget)
-
-        # Right panel: plan overview, case detail, monitoring
-        right_widget = QtWidgets.QWidget()
-        right_layout = QtWidgets.QVBoxLayout(right_widget)
-        right_layout.setSpacing(12)
-
         plan_box = QtWidgets.QGroupBox("计划总览")
         plan_layout = QtWidgets.QGridLayout(plan_box)
         plan_layout.setHorizontalSpacing(12)
@@ -357,7 +334,30 @@ class MainWindow(QtWidgets.QMainWindow):
         stats_row.addStretch()
         plan_layout.addLayout(stats_row, 2, 0, 1, 4)
 
-        right_layout.addWidget(plan_box)
+        root_layout.addWidget(plan_box)
+
+        # ------------------------------------------------------------------
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        root_layout.addWidget(splitter, stretch=1)
+
+        # Left panel: filters and case tree
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        left_layout.setSpacing(12)
+        self._case_tree = QtWidgets.QTreeWidget()
+        self._case_tree.setHeaderLabels(["测试用例"])
+        self._case_tree.header().setStretchLastSection(True)
+        self._case_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self._case_tree.setIndentation(18)
+        self._case_tree.setUniformRowHeights(True)
+        left_layout.addWidget(self._case_tree, stretch=1)
+
+        splitter.addWidget(left_widget)
+
+        # Right panel: case detail, monitoring
+        right_widget = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_widget)
+        right_layout.setSpacing(12)
 
         case_box = QtWidgets.QGroupBox("用例详情")
         case_layout = QtWidgets.QVBoxLayout(case_box)
@@ -1109,14 +1109,9 @@ class MainWindow(QtWidgets.QMainWindow):
         hint_text: Optional[str] = None
 
         if entry.is_general:
-            selected_data = self._device_filter.currentData()
-            if isinstance(selected_data, int):
-                device_model_id = int(selected_data)
-                plan_device_model_id = None
-                label = self._device_filter.currentText() or "通用"
-                hint_text = f"自动机型：{label}"
-            else:
-                hint_text = "自动机型：通用"
+            device_model_id = None
+            plan_device_model_id = None
+            hint_text = "自动机型：通用"
         else:
             if entry.device_label:
                 hint_text = f"执行机型：{entry.device_label}"
