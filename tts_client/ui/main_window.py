@@ -20,7 +20,7 @@ from ..core.models import (
     TestPlan,
 )
 from ..core.monitor_parser import MonitoringAction, parse_keywords, require_attachment
-from ..core.settings import WindowStateStore
+from ..core.settings import ExecutionStateStore, WindowStateStore
 from ..monitoring.manager import MonitoringManager
 
 
@@ -193,12 +193,14 @@ class MainWindow(QtWidgets.QMainWindow):
         api_client: ApiClient,
         monitoring: MonitoringManager,
         state_store: WindowStateStore,
+        execution_store: ExecutionStateStore,
         user_info: Dict[str, object],
     ) -> None:
         super().__init__()
         self._api = api_client
         self._monitoring = monitoring
         self._state_store = state_store
+        self._execution_state_store = execution_store
         self._user = user_info
         self._logger = logging.getLogger(__name__)
 
@@ -217,6 +219,50 @@ class MainWindow(QtWidgets.QMainWindow):
         self._awaiting_monitor_completion_for_pass = False
         self._pending_filter_state: Optional[Dict[str, object]] = None
         self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
+        self._restoring_state = True
+        self._restore_finish_scheduled = False
+        self._restore_department_applied = False
+        self._restore_project_applied = False
+        self._restore_plan_applied = False
+        self._last_monitor_start: Optional[str] = None
+        self._resume_hint: Optional[str] = None
+        self._resume_pending = False
+        self._resume_message_shown = False
+
+        self._state_user_key = self._derive_state_key(user_info)
+        saved_state = self._execution_state_store.load(self._state_user_key)
+        self._saved_department_id = self._coerce_optional_int(saved_state.get("department_id"))
+        self._saved_project_id = self._coerce_optional_int(saved_state.get("project_id"))
+        self._saved_plan_id = self._coerce_optional_int(saved_state.get("plan_id"))
+
+        filters = saved_state.get("filters")
+        if isinstance(filters, dict):
+            self._pending_filter_state = {
+                "directory": filters.get("directory"),
+                "device": filters.get("device"),
+                "result": filters.get("result"),
+            }
+
+        selection = self._normalize_selection(saved_state.get("selection"))
+        if selection:
+            self._pending_selection = selection
+
+        monitoring_state = saved_state.get("monitoring")
+        if isinstance(monitoring_state, dict):
+            self._last_monitor_start = monitoring_state.get("started_at")
+            explicit_resume = monitoring_state.get("resume_required")
+            if explicit_resume is not None:
+                self._resume_pending = bool(explicit_resume)
+            else:
+                self._resume_pending = bool(
+                    monitoring_state.get("running")
+                    or monitoring_state.get("locked")
+                    or saved_state.get("execution_locked")
+                )
+            self._resume_hint = self._build_resume_hint(monitoring_state, selection)
+        elif saved_state.get("execution_locked"):
+            self._resume_pending = True
+            self._resume_hint = self._build_resume_hint({}, selection)
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -552,6 +598,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 button.setEnabled(False)
             self._pass_btn.setToolTip("")
             self._refresh_start_button_state()
+            if not self._resume_pending:
+                self._last_monitor_start = None
 
     def _update_pass_button_state(self) -> None:
         if self._awaiting_monitor_completion_for_pass:
@@ -578,6 +626,7 @@ class MainWindow(QtWidgets.QMainWindow):
             widget.setEnabled(not locked)
         self._case_tree.setDisabled(locked)
         self._refresh_start_button_state()
+        self._persist_state()
 
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
@@ -608,20 +657,180 @@ class MainWindow(QtWidgets.QMainWindow):
             self.restoreState(state)
 
     # ------------------------------------------------------------------
+    def _derive_state_key(self, user_info: Dict[str, object]) -> str:
+        for key in ("id", "user_id", "username", "account"):
+            value = user_info.get(key)
+            if value:
+                return str(value)
+        return "default"
+
+    @staticmethod
+    def _coerce_optional_int(value: object) -> Optional[int]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _normalize_selection(
+        self, raw: object
+    ) -> Optional[Tuple[int, Optional[int], Optional[int], bool]]:
+        if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+            return None
+        case_id = self._coerce_optional_int(raw[0])
+        if case_id is None:
+            return None
+        device_id = self._coerce_optional_int(raw[1])
+        plan_device_id = self._coerce_optional_int(raw[2])
+        is_general = bool(raw[3])
+        return (case_id, device_id, plan_device_id, is_general)
+
+    def _matches_data(self, current: object, target: object) -> bool:
+        if current is None or target is None:
+            return current is None and target is None
+        current_int = self._coerce_optional_int(current)
+        target_int = self._coerce_optional_int(target)
+        if current_int is not None and target_int is not None:
+            return current_int == target_int
+        return current == target
+
+    def _set_combo_index(self, combo: QtWidgets.QComboBox, value: object) -> bool:
+        if value is None:
+            return False
+        for index in range(combo.count()):
+            if self._matches_data(combo.itemData(index), value):
+                if combo.currentIndex() != index:
+                    combo.setCurrentIndex(index)
+                return True
+        return False
+
+    def _build_resume_hint(
+        self,
+        monitoring_state: Optional[Dict[str, object]],
+        selection: Optional[Tuple[int, Optional[int], Optional[int], bool]],
+    ) -> Optional[str]:
+        if not self._resume_pending:
+            return None
+        if not isinstance(monitoring_state, dict):
+            monitoring_state = {}
+        parts = ["检测到上次执行任务未正常结束。"]
+        case_title = monitoring_state.get("case_title")
+        case_id = monitoring_state.get("case_id")
+        if case_title:
+            parts.append(f"用例：{case_title}")
+        elif case_id:
+            parts.append(f"用例 ID: {case_id}")
+        elif selection:
+            parts.append(f"用例 ID: {selection[0]}")
+        started_at = monitoring_state.get("started_at") or self._last_monitor_start
+        if started_at:
+            parts.append(f"开始时间：{started_at}")
+        parts.append("请确认设备状态后重新开始执行。")
+        return " ".join(parts)
+
+    def _update_resume_hint(self) -> None:
+        if not self._resume_pending:
+            self._resume_hint = None
+            return
+        selection = self._selection_key(self._current_entry)
+        monitoring_state: Dict[str, object] = {"resume_required": True}
+        if self._last_monitor_start:
+            monitoring_state["started_at"] = self._last_monitor_start
+        if self._current_case:
+            if self._current_case.title:
+                monitoring_state["case_title"] = self._current_case.title
+            if self._current_case.case_id is not None:
+                monitoring_state["case_id"] = self._current_case.case_id
+        self._resume_hint = self._build_resume_hint(monitoring_state, selection)
+
+    def _display_resume_message_if_needed(self) -> None:
+        if not self._resume_hint or self._resume_message_shown:
+            return
+        self._append_log(self._resume_hint)
+        self._resume_message_shown = True
+
+    def _schedule_finish_restore(self) -> None:
+        if not self._restoring_state or self._restore_finish_scheduled:
+            return
+        self._restore_finish_scheduled = True
+        QtCore.QTimer.singleShot(0, self._finish_initial_restore)
+
+    def _finish_initial_restore(self) -> None:
+        self._restore_finish_scheduled = False
+        if not self._restoring_state:
+            return
+        self._restoring_state = False
+        self._display_resume_message_if_needed()
+        self._persist_state()
+
+    def _collect_state(self) -> Dict[str, object]:
+        state: Dict[str, object] = {}
+        dept_id = self._coerce_optional_int(self._department_combo.currentData())
+        if dept_id is not None:
+            state["department_id"] = dept_id
+        project_id = self._coerce_optional_int(self._project_combo.currentData())
+        if project_id is not None:
+            state["project_id"] = project_id
+        plan_id = self._coerce_optional_int(self._plan_combo.currentData())
+        if plan_id is not None:
+            state["plan_id"] = plan_id
+
+        state["filters"] = {
+            "directory": self._directory_filter.currentData(),
+            "device": self._device_filter.currentData() if self._device_filter.isEnabled() else None,
+            "result": self._result_filter.currentData(),
+        }
+
+        selection = self._selection_key(self._current_entry)
+        if selection:
+            state["selection"] = [selection[0], selection[1], selection[2], selection[3]]
+
+        monitoring: Dict[str, object] = {
+            "running": self._monitoring.is_running(),
+            "locked": self._execution_locked,
+            "resume_required": self._resume_pending,
+        }
+        if self._last_monitor_start:
+            monitoring["started_at"] = self._last_monitor_start
+        if selection:
+            monitoring["selection"] = [selection[0], selection[1], selection[2], selection[3]]
+        if self._current_case:
+            if self._current_case.case_id is not None:
+                monitoring["case_id"] = self._current_case.case_id
+            if self._current_case.title:
+                monitoring["case_title"] = self._current_case.title
+        state["monitoring"] = monitoring
+        state["saved_at"] = dt.datetime.now().isoformat()
+        return state
+
+    def _persist_state(self, force: bool = False) -> None:
+        if not force and self._restoring_state:
+            return
+        payload = self._collect_state()
+        self._execution_state_store.save(self._state_user_key, payload)
+
+    # ------------------------------------------------------------------
     def _append_log(self, message: str) -> None:
         self._log_view.appendPlainText(message)
 
     def _on_monitoring_finished(self) -> None:
         self._append_log("监控已结束")
+        self._resume_pending = True
+        self._update_resume_hint()
         if self._awaiting_monitor_completion_for_pass:
             self._awaiting_monitor_completion_for_pass = False
             if self._pass_btn.isVisible():
                 self._update_pass_button_state()
+        self._persist_state()
 
     def _on_monitoring_error(self, message: str) -> None:
         QtWidgets.QMessageBox.critical(self, "监控失败", message)
         self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
+        self._resume_pending = True
+        self._update_resume_hint()
+        self._persist_state()
 
     # ------------------------------------------------------------------
     def _load_departments(self) -> None:
@@ -639,9 +848,14 @@ class MainWindow(QtWidgets.QMainWindow):
         for dept in self._departments:
             self._department_combo.addItem(dept.name, dept.id)
         self._department_combo.blockSignals(False)
+        restored = False
         if self._departments:
-            self._department_combo.setCurrentIndex(0)
-            self._on_department_changed(0)
+            if not self._restore_department_applied:
+                self._restore_department_applied = True
+                restored = self._set_combo_index(self._department_combo, self._saved_department_id)
+            if not restored:
+                self._department_combo.setCurrentIndex(0)
+        self._persist_state()
 
     def _on_department_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._departments):
@@ -657,9 +871,16 @@ class MainWindow(QtWidgets.QMainWindow):
         for project in self._projects:
             self._project_combo.addItem(project.name, project.id)
         self._project_combo.blockSignals(False)
+        restored = False
         if self._projects:
-            self._project_combo.setCurrentIndex(0)
-            self._on_project_changed(0)
+            should_try_restore = not self._restore_project_applied
+            if should_try_restore:
+                self._restore_project_applied = True
+                if self._matches_data(self._department_combo.currentData(), self._saved_department_id):
+                    restored = self._set_combo_index(self._project_combo, self._saved_project_id)
+            if not restored:
+                self._project_combo.setCurrentIndex(0)
+        self._persist_state()
 
     def _on_project_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._projects):
@@ -676,9 +897,19 @@ class MainWindow(QtWidgets.QMainWindow):
         for plan in self._plans:
             self._plan_combo.addItem(plan.name, plan.id)
         self._plan_combo.blockSignals(False)
+        restored = False
         if self._plans:
-            self._plan_combo.setCurrentIndex(0)
-            self._on_plan_changed(0)
+            should_try_restore = not self._restore_plan_applied
+            if should_try_restore:
+                self._restore_plan_applied = True
+                if (
+                    self._matches_data(self._department_combo.currentData(), self._saved_department_id)
+                    and self._matches_data(self._project_combo.currentData(), self._saved_project_id)
+                ):
+                    restored = self._set_combo_index(self._plan_combo, self._saved_plan_id)
+            if not restored:
+                self._plan_combo.setCurrentIndex(0)
+        self._persist_state()
 
     def _on_plan_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._plans):
@@ -719,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_device_filter()
         self._restore_pending_filters()
         self._apply_filters()
+        self._persist_state()
 
     def _refresh_device_filter(self) -> None:
         devices: Dict[int, str] = {}
@@ -916,6 +1148,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if device_value is None and self._device_filter.isEnabled():
             self._filtered_entries = []
             self._refresh_case_tree()
+            self._persist_state()
             return
 
         entries: List[CaseDisplayEntry] = []
@@ -937,6 +1170,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._filtered_entries = entries
         self._logger.info("筛选后用例数量: %d", len(self._filtered_entries))
         self._refresh_case_tree()
+        self._persist_state()
 
     def _update_plan_summary(self) -> None:
         detail = self._plan_detail
@@ -995,6 +1229,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._filtered_entries:
             self._case_tree.blockSignals(False)
             self._update_case_detail(None)
+            self._schedule_finish_restore()
             return
 
         parents: dict[tuple[str, ...], QtWidgets.QTreeWidgetItem] = {}
@@ -1038,6 +1273,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._case_tree.setCurrentItem(selected_item)
         else:
             self._select_first_case()
+        self._schedule_finish_restore()
 
     def _select_first_case(self) -> None:
         root = self._case_tree.invisibleRootItem()
@@ -1210,10 +1446,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._case_tree.setCurrentItem(previous)
             else:
                 self._update_case_detail(None)
+                self._persist_state()
             return
         case = entry.case
         self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
         self._update_case_detail(entry)
+        self._persist_state()
 
     def _update_case_detail(self, entry: Optional[CaseDisplayEntry]) -> None:
         self._current_entry = entry
@@ -1235,6 +1473,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._keyword_error.setVisible(False)
             self._attachment_hint.clear()
             self._refresh_start_button_state()
+            self._update_resume_hint()
             return
 
         self._title_label.setText(self._case_display_text(entry))
@@ -1290,6 +1529,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._attachment_hint.setText("此用例包含时间监控，提交 PASS/FAIL 必须上传截图")
         else:
             self._attachment_hint.clear()
+        self._update_resume_hint()
 
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
@@ -1303,11 +1543,16 @@ class MainWindow(QtWidgets.QMainWindow):
             "时间" in action.name for action in self._current_actions
         )
         start_time = dt.datetime.now().isoformat()
+        self._resume_pending = False
+        self._resume_hint = None
+        self._resume_message_shown = False
+        self._last_monitor_start = start_time
         self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
         self._append_log("监控已启动")
         self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
         self._set_action_buttons_mode(True)
         self._set_execution_lock(True)
+        self._persist_state()
 
     def _resolve_submission_device(
         self, entry: CaseDisplayEntry
@@ -1396,6 +1641,9 @@ class MainWindow(QtWidgets.QMainWindow):
             plan_device_model_id,
         )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
+        self._resume_pending = False
+        self._resume_hint = None
+        self._resume_message_shown = False
         self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
         self._reload_current_plan()
@@ -1416,6 +1664,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+        if self._monitoring.is_running():
+            self._resume_pending = True
+            self._update_resume_hint()
+        self._persist_state(force=True)
         geometry = self.saveGeometry()
         state = self.saveState()
         self._state_store.save(geometry, state)
