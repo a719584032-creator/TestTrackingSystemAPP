@@ -375,12 +375,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         right_layout.addWidget(case_box)
 
-        monitor_box = QtWidgets.QGroupBox("监控执行")
+        monitor_box = QtWidgets.QGroupBox("监控日志")
         monitor_layout = QtWidgets.QVBoxLayout(monitor_box)
         monitor_layout.setSpacing(12)
 
         monitor_button_row = QtWidgets.QHBoxLayout()
-        self._start_monitor_btn = QtWidgets.QPushButton("开始监控")
+        self._start_monitor_btn = QtWidgets.QPushButton("开始执行")
         self._stop_monitor_btn = QtWidgets.QPushButton("停止")
         self._stop_monitor_btn.setEnabled(False)
         monitor_button_row.addWidget(self._start_monitor_btn)
