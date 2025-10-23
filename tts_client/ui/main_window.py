@@ -4,13 +4,21 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ..core.api_client import ApiClient, encode_attachment
 from ..core.exceptions import AuthenticationError, ClientError, ValidationError
-from ..core.models import Department, PlanCase, PlanDetail, Project, TestPlan
+from ..core.models import (
+    CaseExecutionResult,
+    Department,
+    PlanCase,
+    PlanDetail,
+    Project,
+    TestPlan,
+)
 from ..core.monitor_parser import MonitoringAction, parse_keywords, require_attachment
 from ..core.settings import WindowStateStore
 from ..monitoring.manager import MonitoringManager
@@ -25,6 +33,28 @@ STATUS_COLORS = {
 
 DEFAULT_STATUS_COLOR = "#6B7280"
 
+PASS_SYMBOL_COLOR = "#16A34A"
+FAIL_SYMBOL_COLOR = "#DC2626"
+
+
+@dataclass(slots=True)
+class CaseDisplayEntry:
+    """Flattened representation of a plan case row for the tree view."""
+
+    case: PlanCase
+    execution: Optional[CaseExecutionResult]
+    device_label: str
+    device_model_id: Optional[int]
+    plan_device_model_id: Optional[int]
+    is_general: bool
+
+    def result_value(self) -> str:
+        if self.execution and self.execution.result:
+            return self.execution.result.lower()
+        if self.is_general and self.case.latest_result:
+            return self.case.latest_result.lower()
+        return "pending"
+
 
 class ResultDialog(QtWidgets.QDialog):
     """Dialog used to collect execution metadata before submitting results."""
@@ -34,7 +64,7 @@ class ResultDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget,
         result_label: str,
         case_title: str,
-        device_options: Sequence[Tuple[str, Optional[int]]],
+        device_hint: Optional[str],
         require_attachment: bool,
     ) -> None:
         super().__init__(parent)
@@ -64,10 +94,10 @@ class ResultDialog(QtWidgets.QDialog):
         self._bug_edit.setPlaceholderText("缺陷编号（可选）")
         form.addRow("缺陷编号", self._bug_edit)
 
-        self._device_combo = QtWidgets.QComboBox()
-        for label, value in device_options:
-            self._device_combo.addItem(label, value)
-        form.addRow("执行设备", self._device_combo)
+        if device_hint:
+            hint_label = QtWidgets.QLabel(device_hint)
+            hint_label.setStyleSheet("color: #4B5563;")
+            form.addRow("执行机型", hint_label)
         layout.addLayout(form)
 
         attachment_box = QtWidgets.QGroupBox("截图 / 附件")
@@ -140,10 +170,6 @@ class ResultDialog(QtWidgets.QDialog):
         value = self._bug_edit.text().strip()
         return value or None
 
-    def selected_device(self) -> Optional[int]:
-        data = self._device_combo.currentData()
-        return int(data) if data is not None else None
-
     # ------------------------------------------------------------------
     def accept(self) -> None:  # noqa: D401 - inherited docstring
         if self._require_attachment and not self._attachments:
@@ -174,11 +200,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._projects: List[Project] = []
         self._plans: List[TestPlan] = []
         self._cases: List[PlanCase] = []
-        self._filtered_cases: List[PlanCase] = []
+        self._filtered_entries: List[CaseDisplayEntry] = []
+        self._current_entry: Optional[CaseDisplayEntry] = None
         self._current_case: Optional[PlanCase] = None
         self._current_actions: List[MonitoringAction] = []
         self._plan_detail: Optional[PlanDetail] = None
-        self._current_device_options: List[Tuple[str, Optional[int]]] = []
+        self._current_device_id: Optional[int] = None
+        self._current_plan_device_model_id: Optional[int] = None
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -593,7 +621,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_plan_summary()
             self._refresh_directory_filter()
             self._refresh_device_filter()
-            self._filtered_cases = []
+            self._filtered_entries = []
             self._refresh_case_tree()
             return
 
@@ -625,20 +653,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_filters()
 
     def _refresh_device_filter(self) -> None:
-        devices = sorted(
-            {
-                model.name or model.model_code or str(model.id)
-                for case in self._cases
-                for model in case.device_models
-                if model.name or model.model_code
-            }
-        )
+        devices: Dict[int, str] = {}
+        for case in self._cases:
+            for model in case.device_models:
+                if getattr(model, "id", None) is None:
+                    continue
+                label = self._format_device_label(model.name, model.model_code, model.id)
+                devices[int(model.id)] = label
+            for execution in case.execution_results or []:
+                if not execution.device_model_id:
+                    continue
+                device_id = int(execution.device_model_id)
+                if device_id not in devices:
+                    label = self._format_device_label(
+                        execution.device_model_name,
+                        execution.device_model_code,
+                        device_id,
+                    )
+                    devices[device_id] = label
+
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
         self._device_filter.addItem("请选择机型", None)
         self._device_filter.addItem("全部机型", "__ALL__")
-        for name in devices:
-            self._device_filter.addItem(name, name)
+        for device_id, label in sorted(devices.items(), key=lambda item: item[1]):
+            self._device_filter.addItem(label, device_id)
         self._device_filter.setEnabled(True)
         self._device_filter.blockSignals(False)
         self._device_filter.setCurrentIndex(0)
@@ -660,35 +699,144 @@ class MainWindow(QtWidgets.QMainWindow):
         self._directory_filter.blockSignals(False)
         self._directory_filter.setCurrentIndex(0)
 
+    def _format_device_label(
+        self,
+        name: Optional[str],
+        model_code: Optional[str],
+        device_id: Optional[int],
+    ) -> str:
+        if name:
+            return name
+        if model_code:
+            return model_code
+        if device_id:
+            return f"机型#{device_id}"
+        return "通用"
+
+    def _latest_execution_for_device(
+        self,
+        executions: Sequence[CaseExecutionResult],
+        device_id: Optional[int],
+    ) -> Optional[CaseExecutionResult]:
+        candidates = [
+            execution
+            for execution in executions
+            if (execution.device_model_id or None) == device_id
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.executed_at or "")
+
+    def _build_case_entries(self, case: PlanCase) -> List[CaseDisplayEntry]:
+        entries: List[CaseDisplayEntry] = []
+        executions = case.execution_results or []
+        device_models = {
+            model.id: model
+            for model in case.device_models
+            if getattr(model, "id", None)
+        }
+
+        if device_models:
+            seen_devices: set[int] = set()
+            for device_id, model in device_models.items():
+                execution = self._latest_execution_for_device(executions, device_id)
+                label = self._format_device_label(model.name, model.model_code, device_id)
+                plan_device_model_id = execution.plan_device_model_id if execution else None
+                entries.append(
+                    CaseDisplayEntry(
+                        case=case,
+                        execution=execution,
+                        device_label=label,
+                        device_model_id=device_id,
+                        plan_device_model_id=plan_device_model_id,
+                        is_general=False,
+                    )
+                )
+                seen_devices.add(device_id)
+
+            extra_results: Dict[int, CaseExecutionResult] = {}
+            for execution in executions:
+                if not execution.device_model_id:
+                    continue
+                device_id = int(execution.device_model_id)
+                if device_id in seen_devices:
+                    continue
+                current = extra_results.get(device_id)
+                if not current or (execution.executed_at or "") > (current.executed_at or ""):
+                    extra_results[device_id] = execution
+            for device_id, execution in extra_results.items():
+                label = self._format_device_label(
+                    execution.device_model_name,
+                    execution.device_model_code,
+                    device_id,
+                )
+                entries.append(
+                    CaseDisplayEntry(
+                        case=case,
+                        execution=execution,
+                        device_label=label,
+                        device_model_id=device_id,
+                        plan_device_model_id=execution.plan_device_model_id,
+                        is_general=False,
+                    )
+                )
+                seen_devices.add(device_id)
+
+            if not entries:
+                execution = self._latest_execution_for_device(executions, None)
+                entries.append(
+                    CaseDisplayEntry(
+                        case=case,
+                        execution=execution,
+                        device_label="通用",
+                        device_model_id=None,
+                        plan_device_model_id=execution.plan_device_model_id if execution else None,
+                        is_general=True,
+                    )
+                )
+            return entries
+
+        execution = self._latest_execution_for_device(executions, None)
+        entries.append(
+            CaseDisplayEntry(
+                case=case,
+                execution=execution,
+                device_label="通用",
+                device_model_id=None,
+                plan_device_model_id=None,
+                is_general=True,
+            )
+        )
+        return entries
+
     def _apply_filters(self) -> None:
         directory_value = self._directory_filter.currentData()
         device_value = self._device_filter.currentData()
         result_value = self._result_filter.currentData()
 
         if device_value is None and self._device_filter.isEnabled():
-            self._filtered_cases = []
+            self._filtered_entries = []
             self._refresh_case_tree()
             return
 
-        def matches(case: PlanCase) -> bool:
+        entries: List[CaseDisplayEntry] = []
+        for case in self._cases:
             if directory_value and self._normalize_directory(case.group_path) != directory_value:
-                return False
-            if device_value and device_value != "__ALL__":
-                names = {
-                    model.name or model.model_code or str(model.id)
-                    for model in case.device_models
-                    if model.name or model.model_code or model.id
-                }
-                if device_value not in names:
-                    return False
-            if result_value:
-                latest = (case.latest_result or "pending").lower()
-                if latest != result_value:
-                    return False
-            return True
+                continue
+            case_entries = self._build_case_entries(case)
+            for entry in case_entries:
+                if device_value not in (None, "__ALL__"):
+                    if isinstance(device_value, int):
+                        if not entry.is_general and entry.device_model_id != int(device_value):
+                            continue
+                    else:
+                        continue
+                if result_value and entry.result_value() != result_value:
+                    continue
+                entries.append(entry)
 
-        self._filtered_cases = [case for case in self._cases if matches(case)]
-        self._logger.info("筛选后用例数量: %d", len(self._filtered_cases))
+        self._filtered_entries = entries
+        self._logger.info("筛选后用例数量: %d", len(self._filtered_entries))
         self._refresh_case_tree()
 
     def _update_plan_summary(self) -> None:
@@ -745,7 +893,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_case_tree(self) -> None:
         self._case_tree.blockSignals(True)
         self._case_tree.clear()
-        if not self._filtered_cases:
+        if not self._filtered_entries:
             self._case_tree.blockSignals(False)
             self._update_case_detail(None)
             return
@@ -753,7 +901,8 @@ class MainWindow(QtWidgets.QMainWindow):
         parents: dict[tuple[str, ...], QtWidgets.QTreeWidgetItem] = {}
         root = self._case_tree.invisibleRootItem()
 
-        for case in self._filtered_cases:
+        for entry in self._filtered_entries:
+            case = entry.case
             tokens = self._directory_tokens(case.group_path)
             parent = root
             key: tuple[str, ...] = ()
@@ -765,8 +914,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     parent.addChild(node)
                     parents[key] = node
                 parent = parents[key]
-            item = QtWidgets.QTreeWidgetItem([self._case_display_text(case)])
-            item.setData(0, QtCore.Qt.UserRole, case)
+            display_text = self._case_display_text(entry)
+            item = QtWidgets.QTreeWidgetItem([display_text])
+            item.setData(0, QtCore.Qt.UserRole, entry)
+            result_color = self._status_color(entry)
+            if result_color:
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor(result_color)))
             keywords = case.display_keywords()
             if keywords:
                 item.setToolTip(0, f"关键字: {keywords}")
@@ -807,10 +960,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return ["未分组"]
         return normalized.split("/")
 
-    def _case_status_symbol(self, case: PlanCase) -> str:
-        result = (case.latest_result or "").lower()
-        if not result and case.execution_results:
-            result = (case.execution_results[0].result or "").lower()
+    def _case_status_symbol(self, entry: CaseDisplayEntry) -> str:
+        result = entry.result_value()
         mapping = {
             "pass": "√",
             "fail": "×",
@@ -822,13 +973,25 @@ class MainWindow(QtWidgets.QMainWindow):
         }
         return mapping.get(result, "")
 
-    def _case_display_text(self, case: PlanCase, include_status: bool = True) -> str:
+    def _status_color(self, entry: CaseDisplayEntry) -> Optional[str]:
+        result = entry.result_value()
+        if result == "pass":
+            return PASS_SYMBOL_COLOR
+        if result == "fail":
+            return FAIL_SYMBOL_COLOR
+        return None
+
+    def _case_display_text(self, entry: CaseDisplayEntry, include_status: bool = True) -> str:
+        case = entry.case
         parts: List[str] = []
-        status = self._case_status_symbol(case) if include_status else ""
+        status = self._case_status_symbol(entry) if include_status else ""
         if status:
             parts.append(status)
         title = (case.title or "").strip() or f"用例 {case.case_id}"
         parts.append(title)
+        device_hint = entry.device_label.strip()
+        if device_hint:
+            parts.append(f"({device_hint})")
         keywords = case.display_keywords()
         if keywords:
             parts.append(f"[{keywords}]")
@@ -839,20 +1002,24 @@ class MainWindow(QtWidgets.QMainWindow):
         current: Optional[QtWidgets.QTreeWidgetItem],
         previous: Optional[QtWidgets.QTreeWidgetItem],
     ) -> None:
-        case = current.data(0, QtCore.Qt.UserRole) if current else None
-        if not case:
+        entry = current.data(0, QtCore.Qt.UserRole) if current else None
+        if not entry:
             if previous and previous.data(0, QtCore.Qt.UserRole):
                 self._case_tree.setCurrentItem(previous)
             else:
                 self._update_case_detail(None)
             return
+        case = entry.case
         self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
-        self._update_case_detail(case)
+        self._update_case_detail(entry)
 
-    def _update_case_detail(self, case: Optional[PlanCase]) -> None:
+    def _update_case_detail(self, entry: Optional[CaseDisplayEntry]) -> None:
+        self._current_entry = entry
+        case = entry.case if entry else None
         self._current_case = case
         self._current_actions = []
-        self._current_device_options = [("(未指定)", None)]
+        self._current_device_id = entry.device_model_id if entry else None
+        self._current_plan_device_model_id = entry.plan_device_model_id if entry else None
         if not case:
             self._title_label.setText("请选择一条用例")
             self._precondition_view.clear()
@@ -863,7 +1030,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._attachment_hint.clear()
             return
 
-        self._title_label.setText(self._case_display_text(case))
+        self._title_label.setText(self._case_display_text(entry))
 
         preconditions = (case.preconditions or "").strip()
         self._precondition_view.setPlainText(preconditions or "暂无前置条件")
@@ -889,10 +1056,6 @@ class MainWindow(QtWidgets.QMainWindow):
         expected = (case.expected_result or "").strip()
         self._expected_view.setPlainText(expected or "暂无预期结果")
         self._expected_view.verticalScrollBar().setValue(0)
-
-        for model in case.device_models:
-            label = model.name or model.model_code or str(model.id)
-            self._current_device_options.append((label, model.id))
 
         self._keyword_list.clear()
         try:
@@ -938,8 +1101,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_monitor_btn.setEnabled(True)
         self._stop_monitor_btn.setEnabled(False)
 
+    def _resolve_submission_device(
+        self, entry: CaseDisplayEntry
+    ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+        device_model_id = entry.device_model_id
+        plan_device_model_id = entry.plan_device_model_id
+        hint_text: Optional[str] = None
+
+        if entry.is_general:
+            selected_data = self._device_filter.currentData()
+            if isinstance(selected_data, int):
+                device_model_id = int(selected_data)
+                plan_device_model_id = None
+                label = self._device_filter.currentText() or "通用"
+                hint_text = f"自动机型：{label}"
+            else:
+                hint_text = "自动机型：通用"
+        else:
+            if entry.device_label:
+                hint_text = f"执行机型：{entry.device_label}"
+        return device_model_id, plan_device_model_id, hint_text
+
     def _submit_result(self, result: str) -> None:
         if not self._current_case:
+            QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
+            return
+        if not self._current_entry:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
             return
         try:
@@ -948,11 +1135,14 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "关键字错误", str(exc))
             return
         need_attachment = result in {"pass", "fail"} and require_attachment(actions)
+        device_model_id, plan_device_model_id, device_hint = self._resolve_submission_device(
+            self._current_entry
+        )
         dialog = ResultDialog(
             self,
             {"pass": "通过", "fail": "失败", "blocked": "阻塞"}.get(result, result.upper()),
-            self._case_display_text(self._current_case, include_status=False),
-            self._current_device_options,
+            self._case_display_text(self._current_entry, include_status=False),
+            device_hint,
             need_attachment,
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
@@ -965,7 +1155,6 @@ class MainWindow(QtWidgets.QMainWindow):
         remark = dialog.remark()
         failure_reason = dialog.failure_reason()
         bug_ref = dialog.bug_ref()
-        device_model_id = dialog.selected_device()
         attachments = [
             {k: v for k, v in payload.items() if k != "local_path"}
             for payload in dialog.attachments()
@@ -979,16 +1168,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 failure_reason=failure_reason,
                 bug_ref=bug_ref,
                 device_model_id=device_model_id,
+                plan_device_model_id=plan_device_model_id,
                 attachments=attachments or None,
             )
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "提交失败", str(exc))
             return
         self._logger.info(
-            "提交结果: 用例 %s (结果=%s, 设备=%s)",
+            "提交结果: 用例 %s (结果=%s, 设备=%s, 计划设备=%s)",
             self._current_case.case_id,
             result,
             device_model_id,
+            plan_device_model_id,
         )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
         self._reload_current_plan()
