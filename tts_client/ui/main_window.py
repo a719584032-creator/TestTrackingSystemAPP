@@ -198,44 +198,59 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.setSpacing(16)
 
         # ------------------------------------------------------------------
-        # Context selection area
-        context_box = QtWidgets.QGroupBox("执行上下文")
-        context_layout = QtWidgets.QGridLayout(context_box)
-        context_layout.setHorizontalSpacing(12)
-        context_layout.setVerticalSpacing(10)
+        # Unified filter area
+        filter_box = QtWidgets.QGroupBox("筛选")
+        filter_layout = QtWidgets.QGridLayout(filter_box)
+        filter_layout.setHorizontalSpacing(12)
+        filter_layout.setVerticalSpacing(10)
 
-        context_layout.addWidget(QtWidgets.QLabel("部门"), 0, 0)
+        filter_layout.addWidget(QtWidgets.QLabel("部门"), 0, 0)
         self._department_combo = QtWidgets.QComboBox()
         self._department_combo.setMinimumWidth(180)
         self._department_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        context_layout.addWidget(self._department_combo, 0, 1)
+        filter_layout.addWidget(self._department_combo, 0, 1)
 
-        context_layout.addWidget(QtWidgets.QLabel("项目"), 0, 2)
+        filter_layout.addWidget(QtWidgets.QLabel("项目"), 0, 2)
         self._project_combo = QtWidgets.QComboBox()
         self._project_combo.setMinimumWidth(200)
         self._project_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        context_layout.addWidget(self._project_combo, 0, 3)
+        filter_layout.addWidget(self._project_combo, 0, 3)
 
-        context_layout.addWidget(QtWidgets.QLabel("计划"), 1, 0)
+        filter_layout.addWidget(QtWidgets.QLabel("计划"), 0, 4)
         self._plan_combo = QtWidgets.QComboBox()
         self._plan_combo.setMinimumWidth(200)
         self._plan_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        context_layout.addWidget(self._plan_combo, 1, 1)
+        filter_layout.addWidget(self._plan_combo, 0, 5)
 
-        context_layout.addWidget(QtWidgets.QLabel("执行机型"), 1, 2)
+        filter_layout.addWidget(QtWidgets.QLabel("机型"), 1, 0)
         self._device_filter = QtWidgets.QComboBox()
         self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
         self._device_filter.setMinimumWidth(200)
-        context_layout.addWidget(self._device_filter, 1, 3)
+        filter_layout.addWidget(self._device_filter, 1, 1)
+
+        filter_layout.addWidget(QtWidgets.QLabel("目录"), 1, 2)
+        self._directory_filter = QtWidgets.QComboBox()
+        self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._directory_filter.addItem("全部", None)
+        filter_layout.addWidget(self._directory_filter, 1, 3)
+
+        filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 4)
+        self._result_filter = QtWidgets.QComboBox()
+        self._result_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._result_filter.addItem("全部", None)
+        for value in ["pass", "fail", "blocked", "pending", "skipped"]:
+            self._result_filter.addItem(value, value)
+        filter_layout.addWidget(self._result_filter, 1, 5)
 
         refresh_btn = QtWidgets.QPushButton("刷新计划数据")
         refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
         refresh_btn.clicked.connect(self._reload_current_plan)
-        context_layout.addWidget(refresh_btn, 0, 4, 2, 1)
+        filter_layout.addWidget(refresh_btn, 0, 6, 2, 1)
 
-        context_layout.setColumnStretch(1, 1)
-        context_layout.setColumnStretch(3, 1)
-        root_layout.addWidget(context_box)
+        filter_layout.setColumnStretch(1, 1)
+        filter_layout.setColumnStretch(3, 1)
+        filter_layout.setColumnStretch(5, 1)
+        root_layout.addWidget(filter_box)
 
         # ------------------------------------------------------------------
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -245,27 +260,6 @@ class MainWindow(QtWidgets.QMainWindow):
         left_widget = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setSpacing(12)
-
-        filter_box = QtWidgets.QGroupBox("用例筛选")
-        filter_layout = QtWidgets.QGridLayout(filter_box)
-        filter_layout.setHorizontalSpacing(12)
-        filter_layout.setVerticalSpacing(8)
-        filter_layout.addWidget(QtWidgets.QLabel("目录"), 0, 0)
-        self._directory_filter = QtWidgets.QComboBox()
-        self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._directory_filter.addItem("全部", None)
-        filter_layout.addWidget(self._directory_filter, 0, 1)
-
-        filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 0)
-        self._result_filter = QtWidgets.QComboBox()
-        self._result_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._result_filter.addItem("全部", None)
-        for value in ["pass", "fail", "blocked", "pending", "skipped"]:
-            self._result_filter.addItem(value, value)
-        filter_layout.addWidget(self._result_filter, 1, 1)
-        filter_layout.setColumnStretch(1, 1)
-        left_layout.addWidget(filter_box)
-
         self._case_tree = QtWidgets.QTreeWidget()
         self._case_tree.setHeaderLabels(["测试用例"])
         self._case_tree.header().setStretchLastSection(True)
@@ -337,31 +331,43 @@ class MainWindow(QtWidgets.QMainWindow):
 
         right_layout.addWidget(plan_box)
 
-        case_box = QtWidgets.QGroupBox("用例信息")
+        case_box = QtWidgets.QGroupBox("用例详情")
         case_layout = QtWidgets.QVBoxLayout(case_box)
+        case_layout.setSpacing(10)
         self._title_label = QtWidgets.QLabel("请选择一条用例")
         self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self._title_label.setWordWrap(True)
         case_layout.addWidget(self._title_label)
 
-        info_grid = QtWidgets.QGridLayout()
-        info_grid.setHorizontalSpacing(12)
-        info_grid.setVerticalSpacing(6)
-        self._priority_label = QtWidgets.QLabel("-")
-        self._result_label = QtWidgets.QLabel("-")
-        self._directory_label = QtWidgets.QLabel("-")
-        self._device_label = QtWidgets.QLabel("-")
-        self._directory_label.setWordWrap(True)
-        self._device_label.setWordWrap(True)
+        self._precondition_title = QtWidgets.QLabel("前置条件")
+        self._precondition_title.setStyleSheet("font-weight: 600;")
+        case_layout.addWidget(self._precondition_title)
 
-        info_grid.addWidget(QtWidgets.QLabel("优先级"), 0, 0)
-        info_grid.addWidget(self._priority_label, 0, 1)
-        info_grid.addWidget(QtWidgets.QLabel("最新结果"), 0, 2)
-        info_grid.addWidget(self._result_label, 0, 3)
-        info_grid.addWidget(QtWidgets.QLabel("所属目录"), 1, 0)
-        info_grid.addWidget(self._directory_label, 1, 1, 1, 3)
-        info_grid.addWidget(QtWidgets.QLabel("关联机型"), 2, 0)
-        info_grid.addWidget(self._device_label, 2, 1, 1, 3)
-        case_layout.addLayout(info_grid)
+        self._precondition_view = QtWidgets.QPlainTextEdit()
+        self._precondition_view.setReadOnly(True)
+        self._precondition_view.setPlaceholderText("暂无前置条件")
+        self._precondition_view.setMinimumHeight(80)
+        case_layout.addWidget(self._precondition_view)
+
+        self._steps_title = QtWidgets.QLabel("执行步骤")
+        self._steps_title.setStyleSheet("font-weight: 600;")
+        case_layout.addWidget(self._steps_title)
+
+        self._steps_view = QtWidgets.QPlainTextEdit()
+        self._steps_view.setReadOnly(True)
+        self._steps_view.setPlaceholderText("暂无执行步骤")
+        self._steps_view.setMinimumHeight(160)
+        case_layout.addWidget(self._steps_view)
+
+        self._expected_title = QtWidgets.QLabel("预期结果")
+        self._expected_title.setStyleSheet("font-weight: 600;")
+        case_layout.addWidget(self._expected_title)
+
+        self._expected_view = QtWidgets.QPlainTextEdit()
+        self._expected_view.setReadOnly(True)
+        self._expected_view.setPlaceholderText("暂无预期结果")
+        self._expected_view.setMinimumHeight(100)
+        case_layout.addWidget(self._expected_view)
 
         self._attachment_hint = QtWidgets.QLabel("")
         self._attachment_hint.setStyleSheet("color: #2563eb;")
@@ -630,13 +636,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
         self._device_filter.addItem("请选择机型", None)
-        if devices:
-            for name in devices:
-                self._device_filter.addItem(name, name)
-            self._device_filter.setEnabled(True)
-        else:
-            self._device_filter.setItemText(0, "暂无可选机型")
-            self._device_filter.setEnabled(False)
+        self._device_filter.addItem("全部机型", "__ALL__")
+        for name in devices:
+            self._device_filter.addItem(name, name)
+        self._device_filter.setEnabled(True)
         self._device_filter.blockSignals(False)
         self._device_filter.setCurrentIndex(0)
 
@@ -662,7 +665,7 @@ class MainWindow(QtWidgets.QMainWindow):
         device_value = self._device_filter.currentData()
         result_value = self._result_filter.currentData()
 
-        if device_value is None:
+        if device_value is None and self._device_filter.isEnabled():
             self._filtered_cases = []
             self._refresh_case_tree()
             return
@@ -670,7 +673,7 @@ class MainWindow(QtWidgets.QMainWindow):
         def matches(case: PlanCase) -> bool:
             if directory_value and self._normalize_directory(case.group_path) != directory_value:
                 return False
-            if device_value:
+            if device_value and device_value != "__ALL__":
                 names = {
                     model.name or model.model_code or str(model.id)
                     for model in case.device_models
@@ -822,28 +825,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_device_options = [("(未指定)", None)]
         if not case:
             self._title_label.setText("请选择一条用例")
-            self._priority_label.setText("-")
-            self._result_label.setText("-")
-            self._directory_label.setText("-")
-            self._device_label.setText("-")
+            self._precondition_view.clear()
+            self._steps_view.clear()
+            self._expected_view.clear()
             self._keyword_list.clear()
             self._keyword_error.setVisible(False)
             self._attachment_hint.clear()
             return
 
         self._title_label.setText(case.title)
-        self._priority_label.setText(case.priority or "-")
-        self._result_label.setText(case.latest_result or "pending")
-        self._directory_label.setText(self._normalize_directory(case.group_path))
-        device_names: List[str] = []
+
+        preconditions = (case.preconditions or "").strip()
+        self._precondition_view.setPlainText(preconditions or "暂无前置条件")
+        self._precondition_view.verticalScrollBar().setValue(0)
+
+        step_lines: List[str] = []
+        for index, step in enumerate(case.steps or [], start=1):
+            number = step.no if getattr(step, "no", None) else index
+            header = f"{number}. {step.action or ''}".strip()
+            parts: List[str] = [header] if header else []
+            if step.expected:
+                parts.append(f"预期: {step.expected}")
+            if getattr(step, "note", None):
+                parts.append(f"备注: {step.note}")
+            if getattr(step, "keyword", None):
+                parts.append(f"关键字: {step.keyword}")
+            if parts:
+                step_lines.append("\n".join(parts))
+        steps_text = "\n\n".join(step_lines) if step_lines else "暂无执行步骤"
+        self._steps_view.setPlainText(steps_text)
+        self._steps_view.verticalScrollBar().setValue(0)
+
+        expected = (case.expected_result or "").strip()
+        self._expected_view.setPlainText(expected or "暂无预期结果")
+        self._expected_view.verticalScrollBar().setValue(0)
+
         for model in case.device_models:
             label = model.name or model.model_code or str(model.id)
-            device_names.append(label)
             self._current_device_options.append((label, model.id))
-        if device_names:
-            self._device_label.setText("、".join(device_names))
-        else:
-            self._device_label.setText("未关联设备")
 
         self._keyword_list.clear()
         try:
