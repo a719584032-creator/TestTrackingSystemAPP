@@ -765,8 +765,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     parent.addChild(node)
                     parents[key] = node
                 parent = parents[key]
-            item = QtWidgets.QTreeWidgetItem([case.title])
+            item = QtWidgets.QTreeWidgetItem([self._case_display_text(case)])
             item.setData(0, QtCore.Qt.UserRole, case)
+            keywords = case.display_keywords()
+            if keywords:
+                item.setToolTip(0, f"关键字: {keywords}")
             parent.addChild(item)
 
         self._case_tree.expandAll()
@@ -804,6 +807,33 @@ class MainWindow(QtWidgets.QMainWindow):
             return ["未分组"]
         return normalized.split("/")
 
+    def _case_status_symbol(self, case: PlanCase) -> str:
+        result = (case.latest_result or "").lower()
+        if not result and case.execution_results:
+            result = (case.execution_results[0].result or "").lower()
+        mapping = {
+            "pass": "√",
+            "fail": "×",
+            "blocked": "阻",
+            "block": "阻",
+            "pending": "…",
+            "notrun": "…",
+            "skipped": "跳",
+        }
+        return mapping.get(result, "")
+
+    def _case_display_text(self, case: PlanCase, include_status: bool = True) -> str:
+        parts: List[str] = []
+        status = self._case_status_symbol(case) if include_status else ""
+        if status:
+            parts.append(status)
+        title = (case.title or "").strip() or f"用例 {case.case_id}"
+        parts.append(title)
+        keywords = case.display_keywords()
+        if keywords:
+            parts.append(f"[{keywords}]")
+        return " ".join(parts)
+
     def _on_case_selected(
         self,
         current: Optional[QtWidgets.QTreeWidgetItem],
@@ -833,7 +863,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._attachment_hint.clear()
             return
 
-        self._title_label.setText(case.title)
+        self._title_label.setText(self._case_display_text(case))
 
         preconditions = (case.preconditions or "").strip()
         self._precondition_view.setPlainText(preconditions or "暂无前置条件")
@@ -921,7 +951,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ResultDialog(
             self,
             {"pass": "通过", "fail": "失败", "blocked": "阻塞"}.get(result, result.upper()),
-            self._current_case.title,
+            self._case_display_text(self._current_case, include_status=False),
             self._current_device_options,
             need_attachment,
         )

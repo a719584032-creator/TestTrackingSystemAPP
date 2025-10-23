@@ -1,6 +1,7 @@
 """Data models that mirror server side payloads."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -239,6 +240,27 @@ class CaseExecutionResult:
 
 
 @dataclass(slots=True)
+class CaseStep:
+    """Represents a single step within a plan case."""
+
+    no: Optional[int]
+    action: Optional[str]
+    expected: Optional[str]
+    keyword: Optional[str]
+    note: Optional[str]
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CaseStep":
+        return cls(
+            no=payload.get("no"),
+            action=payload.get("action"),
+            expected=payload.get("expected"),
+            keyword=payload.get("keyword"),
+            note=payload.get("note"),
+        )
+
+
+@dataclass(slots=True)
 class PlanCase:
     """Model for the `/test-plans/{plan}/cases` endpoint."""
 
@@ -247,11 +269,18 @@ class PlanCase:
     title: str
     priority: Optional[str]
     latest_result: Optional[str]
+    preconditions: Optional[str]
+    expected_result: Optional[str]
+    include: bool
+    require_all_devices: bool
+    order_no: Optional[int]
+    plan_id: Optional[int]
     keywords: List[str] = field(default_factory=list)
     group_path: Optional[str] = None
     workload_minutes: Optional[int] = None
     execution_results: List[CaseExecutionResult] = field(default_factory=list)
     device_models: List[DeviceModel] = field(default_factory=list)
+    steps: List[CaseStep] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanCase":
@@ -261,6 +290,12 @@ class PlanCase:
             title=payload.get("title", ""),
             priority=payload.get("priority"),
             latest_result=payload.get("latest_result"),
+            preconditions=payload.get("preconditions"),
+            expected_result=payload.get("expected_result"),
+            include=payload.get("include", True),
+            require_all_devices=payload.get("require_all_devices", False),
+            order_no=payload.get("order_no"),
+            plan_id=payload.get("plan_id"),
             keywords=list(payload.get("keywords") or []),
             group_path=payload.get("group_path"),
             workload_minutes=payload.get("workload_minutes"),
@@ -269,12 +304,40 @@ class PlanCase:
                 for result in payload.get("execution_results", [])
             ],
             device_models=_collect_device_models(payload),
+            steps=[CaseStep.from_dict(step) for step in payload.get("steps", [])],
         )
 
     def keyword_actions(self) -> List[str]:
         """Return a sanitized list of keyword tokens."""
 
-        return [token.strip() for token in self.keywords if token]
+        return [
+            token
+            for token in self.keyword_tokens()
+            if "+" in token
+        ]
+
+    def keyword_tokens(self) -> List[str]:
+        """Return flattened keyword tokens for display and parsing."""
+
+        tokens: List[str] = []
+        splitter = re.compile(r"[\s,;，；]+")
+        for raw in self.keywords:
+            if not raw:
+                continue
+            if isinstance(raw, str):
+                parts = splitter.split(raw.strip())
+            else:  # pragma: no cover - defensive
+                parts = [str(raw)]
+            for part in parts:
+                part = part.strip()
+                if part:
+                    tokens.append(part)
+        return tokens
+
+    def display_keywords(self) -> str:
+        """Return keywords formatted for UI display."""
+
+        return " ".join(self.keyword_tokens())
 
 
 def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
