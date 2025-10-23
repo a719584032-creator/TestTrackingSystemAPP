@@ -11,7 +11,7 @@ from .core.auth import AuthStore, RememberedCredentials
 from .core.exceptions import AuthenticationError, ClientError, NetworkError
 from .core.logging import configure_logging
 from .core.ota import OTAUpdater
-from .core.settings import ExecutionStateStore, WindowStateStore
+from .core.settings import WindowStateStore
 from .monitoring.manager import MonitoringManager
 from .ui.login_dialog import LoginDialog
 from .ui.main_window import MainWindow
@@ -29,7 +29,6 @@ def main() -> int:
     api_client = ApiClient()
     auth_store = AuthStore()
     window_state = WindowStateStore()
-    execution_state = ExecutionStateStore()
     monitoring = MonitoringManager()
     updater = OTAUpdater()
 
@@ -64,7 +63,7 @@ def main() -> int:
     if login_dialog.exec_() != QtWidgets.QDialog.Accepted:
         return 0
 
-    window = MainWindow(api_client, monitoring, window_state, execution_state, user_info)
+    window = MainWindow(api_client, monitoring, window_state, user_info)
     window.show()
 
     try:
