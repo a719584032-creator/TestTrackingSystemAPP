@@ -35,6 +35,7 @@ DEFAULT_STATUS_COLOR = "#6B7280"
 
 PASS_SYMBOL_COLOR = "#16A34A"
 FAIL_SYMBOL_COLOR = "#DC2626"
+BLOCK_SYMBOL_COLOR = "#6B7280"
 
 
 @dataclass(slots=True)
@@ -210,6 +211,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._execution_locked = False
         self._awaiting_monitor_completion_for_pass = False
         self._pending_filter_state: Optional[Dict[str, object]] = None
+        self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -981,6 +983,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         parents: dict[tuple[str, ...], QtWidgets.QTreeWidgetItem] = {}
         root = self._case_tree.invisibleRootItem()
+        target_key = self._pending_selection or self._selection_key(self._current_entry)
+        selected_item: Optional[QtWidgets.QTreeWidgetItem] = None
 
         for entry in self._filtered_entries:
             case = entry.case
@@ -1005,10 +1009,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if keywords:
                 item.setToolTip(0, f"关键字: {keywords}")
             parent.addChild(item)
+            if target_key and self._selection_key(entry) == target_key:
+                selected_item = item
 
         self._case_tree.expandAll()
         self._case_tree.blockSignals(False)
-        self._select_first_case()
+        self._pending_selection = None
+        if selected_item is not None:
+            self._case_tree.setCurrentItem(selected_item)
+        else:
+            self._select_first_case()
 
     def _select_first_case(self) -> None:
         root = self._case_tree.invisibleRootItem()
@@ -1046,8 +1056,8 @@ class MainWindow(QtWidgets.QMainWindow):
         mapping = {
             "pass": "√",
             "fail": "×",
-            "blocked": "阻",
-            "block": "阻",
+            "blocked": "⊘",
+            "block": "⊘",
             "pending": "…",
             "notrun": "…",
             "skipped": "跳",
@@ -1060,7 +1070,29 @@ class MainWindow(QtWidgets.QMainWindow):
             return PASS_SYMBOL_COLOR
         if result == "fail":
             return FAIL_SYMBOL_COLOR
+        if result in {"blocked", "block"}:
+            return BLOCK_SYMBOL_COLOR
         return None
+
+    def _selection_key(
+        self, entry: Optional[CaseDisplayEntry]
+    ) -> Optional[Tuple[int, Optional[int], Optional[int], bool]]:
+        if not entry:
+            return None
+        case_identifier: Optional[int] = None
+        if entry.case.id is not None:
+            case_identifier = int(entry.case.id)
+        elif entry.case.case_id is not None:
+            case_identifier = int(entry.case.case_id)
+        if case_identifier is None:
+            return None
+        device_id = entry.device_model_id
+        if device_id is not None:
+            device_id = int(device_id)
+        plan_device_id = entry.plan_device_model_id
+        if plan_device_id is not None:
+            plan_device_id = int(plan_device_id)
+        return (case_identifier, device_id, plan_device_id, entry.is_general)
 
     def _case_display_text(self, entry: CaseDisplayEntry, include_status: bool = True) -> str:
         case = entry.case
@@ -1270,6 +1302,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reload_current_plan()
 
     def _reload_current_plan(self) -> None:
+        self._pending_selection = self._selection_key(self._current_entry)
         index = self._plan_combo.currentIndex()
         if index >= 0:
             self._pending_filter_state = {
