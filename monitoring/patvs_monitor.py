@@ -2,6 +2,7 @@
 # 负责监控逻辑
 from PyQt5 import QtCore
 import logging
+import math
 
 from .devicerm import Notification
 from .lock_screen import monitor_locks
@@ -188,14 +189,37 @@ class Patvs_Fuction():
         """
         监控时间
         """
-        count = 0
-        num_time = num_time * 60
-        wx.CallAfter(self.window.add_log_message, f"执行时间: {num_time} 秒")
         try:
-            while self.stop_event and count < num_time:
-                count += 1
+            minutes = float(num_time)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        minutes = max(0.0, minutes)
+        total_seconds = max(0, math.ceil(minutes * 60))
+        if total_seconds == 0:
+            wx.CallAfter(self.window.add_log_message, "时间关键字为 0，视为立即完成。")
+            wx.CallAfter(self.window.add_log_message, "时间监控已完成，可以提交通过结果")
+            self.action_complete.set()
+            return
+        wx.CallAfter(
+            self.window.add_log_message,
+            f"该用例需要执行 {minutes:g} 分钟，共 {total_seconds} 秒。",
+        )
+        remaining = total_seconds
+        try:
+            while self.stop_event and remaining > 0:
+                wx.CallAfter(
+                    self.window.add_log_message,
+                    f"倒计时：剩余 {remaining} 秒",
+                )
                 time.sleep(1)
-                wx.CallAfter(self.window.add_log_message, f"Running time {count} of ")
+                remaining -= 1
+            if self.stop_event and remaining == 0:
+                wx.CallAfter(
+                    self.window.add_log_message,
+                    "时间监控已完成，可以提交通过结果",
+                )
+            else:
+                wx.CallAfter(self.window.add_log_message, "时间监控已停止")
         finally:
             wx.CallAfter(self.window.add_log_message, "已停止测试时间监控")
             self.action_complete.set()  # 设置动作完成状态
