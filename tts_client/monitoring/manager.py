@@ -60,7 +60,7 @@ class MonitoringManager(QtCore.QObject):
         self._thread = None
         if worker:
             worker.stop_event = False
-        if thread:
+        if thread and thread is not threading.current_thread():
             thread.join(timeout=0)
         self.monitoring_finished.emit()
 
