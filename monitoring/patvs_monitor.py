@@ -28,12 +28,23 @@ import cv2
 logger = logging.getLogger(__name__)
 
 
-class _WxCompat:
+class _WxCompat(QtCore.QObject):
     """Compatibility shim so legacy monitoring logic can run under PyQt."""
 
+    _call_after_signal = QtCore.pyqtSignal(object, tuple, dict)
+
+    def __init__(self):
+        super().__init__()
+        # Ensure callbacks are executed on the Qt main thread regardless of the
+        # originating worker thread.
+        self._call_after_signal.connect(self._invoke, QtCore.Qt.QueuedConnection)
+
+    def CallAfter(self, func, *args, **kwargs):
+        self._call_after_signal.emit(func, args, kwargs)
+
     @staticmethod
-    def CallAfter(func, *args, **kwargs):
-        QtCore.QTimer.singleShot(0, lambda: func(*args, **kwargs))
+    def _invoke(func, args, kwargs):
+        func(*args, **kwargs)
 
     class _App:
         @staticmethod

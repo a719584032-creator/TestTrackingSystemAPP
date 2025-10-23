@@ -209,6 +209,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_plan_device_model_id: Optional[int] = None
         self._execution_locked = False
         self._awaiting_monitor_completion_for_pass = False
+        self._pending_filter_state: Optional[Dict[str, object]] = None
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -663,6 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_plan_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._plans):
+            self._pending_filter_state = None
             self._cases = []
             self._plan_detail = None
             self._update_plan_summary()
@@ -697,6 +699,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._refresh_directory_filter()
         self._refresh_device_filter()
+        self._restore_pending_filters()
         self._apply_filters()
 
     def _refresh_device_filter(self) -> None:
@@ -745,6 +748,37 @@ class MainWindow(QtWidgets.QMainWindow):
             self._directory_filter.addItem(directory, directory)
         self._directory_filter.blockSignals(False)
         self._directory_filter.setCurrentIndex(0)
+
+    def _set_combobox_current_data(
+        self, combo: QtWidgets.QComboBox, value: object
+    ) -> None:
+        combo.blockSignals(True)
+        try:
+            target_index = None
+            if value is None:
+                target_index = 0 if combo.count() else -1
+            else:
+                for index in range(combo.count()):
+                    if combo.itemData(index) == value:
+                        target_index = index
+                        break
+            if target_index is None:
+                target_index = 0 if combo.count() else -1
+            if target_index >= 0:
+                combo.setCurrentIndex(target_index)
+        finally:
+            combo.blockSignals(False)
+
+    def _restore_pending_filters(self) -> None:
+        if not self._pending_filter_state:
+            return
+        state = self._pending_filter_state
+        self._pending_filter_state = None
+        self._set_combobox_current_data(
+            self._directory_filter, state.get("directory")
+        )
+        self._set_combobox_current_data(self._device_filter, state.get("device"))
+        self._set_combobox_current_data(self._result_filter, state.get("result"))
 
     def _format_device_label(
         self,
@@ -1238,7 +1272,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reload_current_plan(self) -> None:
         index = self._plan_combo.currentIndex()
         if index >= 0:
+            self._pending_filter_state = {
+                "directory": self._directory_filter.currentData(),
+                "device": self._device_filter.currentData(),
+                "result": self._result_filter.currentData(),
+            }
             self._on_plan_changed(index)
+            if self._pending_filter_state:
+                # 如果计划重新加载过程中未使用这些值，确保不要遗留旧状态。
+                self._pending_filter_state = None
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
