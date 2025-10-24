@@ -348,7 +348,7 @@ class Patvs_Fuction():
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         total = 0
         log_num = 0
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        start_time = self._normalize_start_time(start_time)
 
         try:
             while self.stop_event:
@@ -411,6 +411,38 @@ class Patvs_Fuction():
         # 获取详细信息中的 EventData
         strings = win32evtlogutil.SafeFormatMessage(event, 'System')
         return strings
+
+    def _normalize_start_time(self, start_time):
+        """Convert various start_time representations to a naive datetime."""
+        if isinstance(start_time, datetime.datetime):
+            return start_time
+
+        if isinstance(start_time, str):
+            value = start_time.strip()
+            if not value:
+                logger.warning("Received empty start_time string; defaulting to now.")
+                return datetime.datetime.now()
+
+            iso_candidate = value
+            if iso_candidate.endswith("Z"):
+                iso_candidate = iso_candidate[:-1] + "+00:00"
+            try:
+                parsed = datetime.datetime.fromisoformat(iso_candidate)
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone().replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                pass
+
+            # 尝试常见的手动格式
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    return datetime.datetime.strptime(value, fmt)
+                except ValueError:
+                    continue
+
+        logger.error(f"Unsupported start_time format: {start_time}, defaulting to current time.")
+        return datetime.datetime.now()
 
     def parse_time(self, time_str):
         time_str = time_str.strip()  # 移除空格
@@ -579,7 +611,7 @@ class Patvs_Fuction():
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         total = 0
         log_num = 0
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        start_time = self._normalize_start_time(start_time)
         try:
             while self.stop_event:
                 if not hand:  # 检查句柄是否有效
@@ -646,7 +678,7 @@ class Patvs_Fuction():
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         total = 0
         log_num = 0
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        start_time = self._normalize_start_time(start_time)
         try:
             while self.stop_event:
                 if not hand:  # 检查句柄是否有效
@@ -713,7 +745,7 @@ class Patvs_Fuction():
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         total = 0
         log_num = 0
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        start_time = self._normalize_start_time(start_time)
         try:
             while self.stop_event:
                 if not hand:  # 检查句柄是否有效
