@@ -589,9 +589,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
-        self._department_combo.currentIndexChanged.connect(self._on_department_changed)
-        self._project_combo.currentIndexChanged.connect(self._on_project_changed)
-        self._plan_combo.currentIndexChanged.connect(self._on_plan_changed)
+        # 使用整数重载，避免 PyQt 选择字符串信号导致比较时报错
+        self._department_combo.currentIndexChanged[int].connect(
+            self._on_department_changed
+        )
+        self._project_combo.currentIndexChanged[int].connect(self._on_project_changed)
+        self._plan_combo.currentIndexChanged[int].connect(self._on_plan_changed)
         self._directory_filter.currentIndexChanged.connect(self._apply_filters)
         self._device_filter.currentIndexChanged.connect(self._apply_filters)
         self._result_filter.currentIndexChanged.connect(self._apply_filters)
