@@ -761,13 +761,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _clear_project_combo(self) -> None:
-        blocker = QtCore.QSignalBlocker(self._project_combo)
-        self._project_combo.clear()
+        with QtCore.QSignalBlocker(self._project_combo):
+            self._project_combo.clear()
+            self._project_combo.addItem("请选择项目", None)
+            self._project_combo.setCurrentIndex(0)
         self._project_combo.setEnabled(bool(self._projects))
 
     def _clear_plan_combo(self) -> None:
-        blocker = QtCore.QSignalBlocker(self._plan_combo)
-        self._plan_combo.clear()
+        with QtCore.QSignalBlocker(self._plan_combo):
+            self._plan_combo.clear()
+            self._plan_combo.addItem("请选择计划", None)
+            self._plan_combo.setCurrentIndex(0)
         self._plan_combo.setEnabled(bool(self._plans))
 
     def _clear_project_and_plan(self) -> None:
@@ -783,6 +787,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         with QtCore.QSignalBlocker(self._project_combo):
+            self._project_combo.clear()
+            self._project_combo.addItem("请选择项目", None)
             for project in self._projects:
                 self._project_combo.addItem(project.name, project.id)
 
@@ -803,6 +809,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         with QtCore.QSignalBlocker(self._plan_combo):
+            self._plan_combo.clear()
+            self._plan_combo.addItem("请选择计划", None)
             for plan in self._plans:
                 self._plan_combo.addItem(plan.name, plan.id)
 
@@ -827,34 +835,45 @@ class MainWindow(QtWidgets.QMainWindow):
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载失败", str(exc))
             return
-        self._department_combo.blockSignals(True)
-        self._department_combo.clear()
-        for dept in self._departments:
-            self._department_combo.addItem(dept.name, dept.id)
-        self._department_combo.blockSignals(False)
-        if self._departments:
-            target_index = 0
-            if self._restore_department_id is not None:
-                restored_index = self._department_combo.findData(self._restore_department_id)
-                if restored_index >= 0:
-                    target_index = restored_index
-            self._department_combo.setCurrentIndex(target_index)
-            self._restore_department_id = None
+        with QtCore.QSignalBlocker(self._department_combo):
+            self._department_combo.clear()
+            self._department_combo.addItem("请选择部门", None)
+            for dept in self._departments:
+                self._department_combo.addItem(dept.name, dept.id)
+
+        self._department_combo.setEnabled(bool(self._departments))
+        target_index = 0
+        if self._restore_department_id is not None:
+            restored_index = self._department_combo.findData(self._restore_department_id)
+            if restored_index >= 0:
+                target_index = restored_index
+        self._department_combo.setCurrentIndex(target_index)
+        if target_index == 0:
+            self._projects = []
+            self._plans = []
+            self._clear_project_and_plan()
+        self._restore_department_id = None
         self.save_state()
 
     def _on_department_changed(self, _index: object) -> None:
-        index = self._department_combo.currentIndex()
-        if index < 0 or index >= len(self._departments):
+        dept_id = self._int_or_none(self._department_combo.currentData())
+        if dept_id is None:
             self._projects = []
             self._plans = []
             self._clear_project_and_plan()
             self.save_state()
             return
 
-        dept = self._departments[index]
-        dept_id = self._int_or_none(self._department_combo.currentData())
-        if dept_id is None:
-            self._logger.warning("部门 %s 缺少有效 ID", dept.name)
+        dept = next(
+            (
+                item
+                for item in self._departments
+                if self._int_or_none(getattr(item, "id", None)) == dept_id
+            ),
+            None,
+        )
+        if dept is None:
+            self._logger.warning("未找到 ID 为 %s 的部门", dept_id)
             return
 
         self._logger.info("选择部门 %s (ID: %s)", dept.name, dept_id)
@@ -872,23 +891,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_project_changed(self, _index: object) -> None:
-        index = self._project_combo.currentIndex()
-        if index < 0 or index >= len(self._projects):
+        project_id = self._int_or_none(self._project_combo.currentData())
+        dept_id = self._int_or_none(self._department_combo.currentData())
+        if project_id is None:
             self._plans = []
             self._clear_plan_combo()
             self.save_state()
             return
+        if dept_id is None:
+            self._logger.warning("当前项目选择缺少部门上下文")
+            return
 
-        project = self._projects[index]
-        project_id = self._int_or_none(self._project_combo.currentData())
-        dept_id = self._int_or_none(self._department_combo.currentData())
-        if project_id is None or dept_id is None:
-            self._logger.warning(
-                "项目 %s 缺少有效 ID (项目: %s, 部门: %s)",
-                project.name,
-                project_id,
-                dept_id,
-            )
+        project = next(
+            (
+                item
+                for item in self._projects
+                if self._int_or_none(getattr(item, "id", None)) == project_id
+            ),
+            None,
+        )
+        if project is None:
+            self._logger.warning("未找到 ID 为 %s 的项目", project_id)
             return
 
         self._logger.info(
@@ -910,8 +933,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_plan_changed(self, _index: object) -> None:
-        index = self._plan_combo.currentIndex()
-        if index < 0 or index >= len(self._plans):
+        plan_id = self._int_or_none(self._plan_combo.currentData())
+        if plan_id is None:
             self._pending_filter_state = None
             self._cases = []
             self._plan_detail = None
@@ -923,8 +946,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.save_state()
             return
 
-        plan = self._plans[index]
-        plan_id = int(self._plan_combo.currentData())
+        plan = next(
+            (
+                item
+                for item in self._plans
+                if self._int_or_none(getattr(item, "id", None)) == plan_id
+            ),
+            None,
+        )
+        if plan is None:
+            self._logger.warning("未找到 ID 为 %s 的计划", plan_id)
+            return
+
         self._logger.info("选择计划 %s (ID: %s)", plan.name, plan_id)
 
         try:
@@ -1596,7 +1629,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
-        plan_id = self._plan_combo.currentData()
+        plan_id = self._int_or_none(self._plan_combo.currentData())
         plan_case_id = self._current_case.id
         if plan_id is None or plan_case_id is None:
             QtWidgets.QMessageBox.warning(self, "提交失败", "当前计划信息缺失，请刷新后重试。")
@@ -1642,14 +1675,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reload_current_plan(self) -> None:
         self._pending_selection = self._selection_key(self._current_entry)
-        index = self._plan_combo.currentIndex()
-        if index >= 0:
+        plan_id = self._int_or_none(self._plan_combo.currentData())
+        if plan_id is not None:
             self._pending_filter_state = {
                 "directory": self._directory_filter.currentData(),
                 "device": self._device_filter.currentData(),
                 "result": self._result_filter.currentData(),
             }
-            self._on_plan_changed(index)
+            self._on_plan_changed(self._plan_combo.currentIndex())
             if self._pending_filter_state:
                 # 如果计划重新加载过程中未使用这些值，确保不要遗留旧状态。
                 self._pending_filter_state = None
