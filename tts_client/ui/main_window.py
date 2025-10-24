@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -217,6 +218,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._awaiting_monitor_completion_for_pass = False
         self._pending_filter_state: Optional[Dict[str, object]] = None
         self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
+
+        self._state_file_path = self._resolve_state_path()
+        self._restore_department_id: Optional[int] = None
+        self._restore_project_id: Optional[int] = None
+        self._restore_plan_id: Optional[int] = None
+        self._restore_start_clicked = False
+        self.restore_state()
 
         self.setWindowTitle("TTS 测试执行客户端")
         self.resize(1280, 720)
@@ -607,6 +615,129 @@ class MainWindow(QtWidgets.QMainWindow):
         if state:
             self.restoreState(state)
 
+    def _resolve_state_path(self) -> str:
+        if os.name == "nt":
+            base_dir = r"C:\\PATVS"
+        else:
+            base_dir = os.path.join(os.path.expanduser("~"), "PATVS")
+        return os.path.join(base_dir, "window_state.json")
+
+    def _state_username(self) -> str:
+        if not isinstance(self._user, dict):
+            return ""
+        for key in ("username", "account", "user_name"):
+            value = self._user.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    @staticmethod
+    def _int_or_none(value: object) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _load_state_payload(self) -> Dict[str, object]:
+        username = self._state_username()
+        if not username:
+            return {}
+        try:
+            with open(self._state_file_path, "r", encoding="utf-8") as state_file:
+                payload = json.load(state_file)
+        except FileNotFoundError:
+            return {}
+        except Exception as exc:  # pragma: no cover - defensive cleanup
+            self._logger.error("读取状态文件失败: %s", exc)
+            try:
+                os.remove(self._state_file_path)
+            except OSError:
+                pass
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        if payload.get("username") != username:
+            return {}
+        return payload
+
+    def restore_state(self) -> None:
+        state = self._load_state_payload()
+        if not state:
+            self._pending_filter_state = None
+            self._pending_selection = None
+            self._restore_department_id = None
+            self._restore_project_id = None
+            self._restore_plan_id = None
+            self._restore_start_clicked = False
+            return
+
+        self._restore_department_id = self._int_or_none(state.get("department_id"))
+        self._restore_project_id = self._int_or_none(state.get("project_id"))
+        self._restore_plan_id = self._int_or_none(state.get("plan_id"))
+
+        filters = state.get("filters")
+        if isinstance(filters, dict):
+            self._pending_filter_state = {
+                "directory": filters.get("directory"),
+                "device": filters.get("device"),
+                "result": filters.get("result"),
+            }
+        else:
+            self._pending_filter_state = None
+
+        selection = state.get("selection")
+        if (
+            isinstance(selection, (list, tuple))
+            and len(selection) == 4
+            and selection[0] is not None
+        ):
+            try:
+                self._pending_selection = (
+                    int(selection[0]),
+                    self._int_or_none(selection[1]),
+                    self._int_or_none(selection[2]),
+                    bool(selection[3]),
+                )
+            except (TypeError, ValueError):
+                self._pending_selection = None
+        else:
+            self._pending_selection = None
+
+        self._restore_start_clicked = bool(state.get("start_clicked"))
+
+    def save_state(self) -> None:
+        username = self._state_username()
+        if not username:
+            return
+
+        state: Dict[str, object] = {
+            "username": username,
+            "department_id": self._int_or_none(self._department_combo.currentData()),
+            "project_id": self._int_or_none(self._project_combo.currentData()),
+            "plan_id": self._int_or_none(self._plan_combo.currentData()),
+            "filters": {
+                "directory": self._directory_filter.currentData(),
+                "device": self._device_filter.currentData(),
+                "result": self._result_filter.currentData(),
+            },
+            "start_clicked": bool(self._monitoring.is_running() or self._execution_locked),
+        }
+
+        selection = self._selection_key(self._current_entry)
+        if selection:
+            state["selection"] = [selection[0], selection[1], selection[2], selection[3]]
+
+        try:
+            directory = os.path.dirname(self._state_file_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(self._state_file_path, "w", encoding="utf-8") as state_file:
+                json.dump(state, state_file, ensure_ascii=False, indent=2)
+        except OSError as exc:  # pragma: no cover - file IO errors are non-fatal
+            self._logger.warning("保存状态失败: %s", exc)
+
     # ------------------------------------------------------------------
     def _append_log(self, message: str) -> None:
         self._log_view.appendPlainText(message)
@@ -617,11 +748,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._awaiting_monitor_completion_for_pass = False
             if self._pass_btn.isVisible():
                 self._update_pass_button_state()
+        self.save_state()
 
     def _on_monitoring_error(self, message: str) -> None:
         QtWidgets.QMessageBox.critical(self, "监控失败", message)
         self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
+        self.save_state()
 
     # ------------------------------------------------------------------
     def _load_departments(self) -> None:
@@ -640,8 +773,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._department_combo.addItem(dept.name, dept.id)
         self._department_combo.blockSignals(False)
         if self._departments:
-            self._department_combo.setCurrentIndex(0)
-            self._on_department_changed(0)
+            target_index = 0
+            if self._restore_department_id is not None:
+                restored_index = self._department_combo.findData(self._restore_department_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._department_combo.setCurrentIndex(target_index)
+            self._restore_department_id = None
+        self.save_state()
 
     def _on_department_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._departments):
@@ -658,8 +797,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._project_combo.addItem(project.name, project.id)
         self._project_combo.blockSignals(False)
         if self._projects:
-            self._project_combo.setCurrentIndex(0)
-            self._on_project_changed(0)
+            target_index = 0
+            if self._restore_project_id is not None:
+                restored_index = self._project_combo.findData(self._restore_project_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._project_combo.setCurrentIndex(target_index)
+            self._restore_project_id = None
+        self.save_state()
 
     def _on_project_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._projects):
@@ -677,8 +822,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._plan_combo.addItem(plan.name, plan.id)
         self._plan_combo.blockSignals(False)
         if self._plans:
-            self._plan_combo.setCurrentIndex(0)
-            self._on_plan_changed(0)
+            target_index = 0
+            if self._restore_plan_id is not None:
+                restored_index = self._plan_combo.findData(self._restore_plan_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._plan_combo.setCurrentIndex(target_index)
+            self._restore_plan_id = None
+        self.save_state()
 
     def _on_plan_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._plans):
@@ -690,6 +841,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_device_filter()
             self._filtered_entries = []
             self._refresh_case_tree()
+            self.save_state()
             return
 
         plan = self._plans[index]
@@ -719,6 +871,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_device_filter()
         self._restore_pending_filters()
         self._apply_filters()
+        self.save_state()
 
     def _refresh_device_filter(self) -> None:
         devices: Dict[int, str] = {}
@@ -916,6 +1069,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if device_value is None and self._device_filter.isEnabled():
             self._filtered_entries = []
             self._refresh_case_tree()
+            self.save_state()
             return
 
         entries: List[CaseDisplayEntry] = []
@@ -937,6 +1091,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._filtered_entries = entries
         self._logger.info("筛选后用例数量: %d", len(self._filtered_entries))
         self._refresh_case_tree()
+        self.save_state()
 
     def _update_plan_summary(self) -> None:
         detail = self._plan_detail
@@ -1214,6 +1369,10 @@ class MainWindow(QtWidgets.QMainWindow):
         case = entry.case
         self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
         self._update_case_detail(entry)
+        self.save_state()
+        if self._restore_start_clicked:
+            self._restore_start_clicked = False
+            QtCore.QTimer.singleShot(0, self._start_monitoring)
 
     def _update_case_detail(self, entry: Optional[CaseDisplayEntry]) -> None:
         self._current_entry = entry
@@ -1308,6 +1467,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
         self._set_action_buttons_mode(True)
         self._set_execution_lock(True)
+        self.save_state()
 
     def _resolve_submission_device(
         self, entry: CaseDisplayEntry
@@ -1398,6 +1558,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
         self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
+        self.save_state()
         self._reload_current_plan()
 
     def _reload_current_plan(self) -> None:
@@ -1416,6 +1577,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+        self.save_state()
         geometry = self.saveGeometry()
         state = self.saveState()
         self._state_store.save(geometry, state)
