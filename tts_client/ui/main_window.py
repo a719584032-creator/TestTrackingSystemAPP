@@ -43,6 +43,15 @@ STATUS_ICON_SIZE = 24
 _STATUS_ICON_CACHE: Dict[str, QtGui.QIcon] = {}
 _STATUS_ICON_PIXMAP_CACHE: Dict[str, QtGui.QPixmap] = {}
 
+RESULT_LABELS = {
+    "pass": "通过",
+    "fail": "失败",
+    "blocked": "阻塞",
+    "block": "阻塞",
+    "pending": "未执行",
+    "skipped": "已跳过",
+}
+
 
 @dataclass(slots=True)
 class CaseDisplayEntry:
@@ -1570,6 +1579,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._current_actions:
             QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
             return
+        if self._current_entry:
+            result_text = self._existing_result_label(self._current_entry)
+            if result_text:
+                confirm = QtWidgets.QMessageBox.question(
+                    self,
+                    "确认执行",
+                    f"当前用例已有执行结果（{result_text}），是否再次执行？",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No,
+                )
+                if confirm != QtWidgets.QMessageBox.Yes:
+                    return
         self._awaiting_monitor_completion_for_pass = any(
             "时间" in action.name for action in self._current_actions
         )
@@ -1580,6 +1601,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_action_buttons_mode(True)
         self._set_execution_lock(True)
         self.save_state()
+
+    def _existing_result_label(self, entry: CaseDisplayEntry) -> Optional[str]:
+        result: Optional[str] = None
+        if entry.execution and entry.execution.result:
+            result = entry.execution.result
+        elif entry.is_general and entry.case.latest_result:
+            result = entry.case.latest_result
+        normalized = (result or "").strip().lower()
+        if not normalized or normalized == "pending":
+            return None
+        return RESULT_LABELS.get(normalized, result or normalized)
 
     def _resolve_submission_device(
         self, entry: CaseDisplayEntry
