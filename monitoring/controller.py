@@ -51,7 +51,7 @@ class MonitoringController(QtCore.QObject):
     def stop(self) -> None:
         if self._worker is None:
             return
-        self._worker.stop_event = False
+        self._worker.is_running = False
 
     def start(self, case_id: int, actions: Sequence[Tuple[str, float]], start_time: str) -> None:
         if self.is_running():
@@ -59,7 +59,7 @@ class MonitoringController(QtCore.QObject):
             return
 
         adapter = _WindowAdapter(self._event, self._handle_finish)
-        self._worker = Patvs_Fuction(window=adapter, stop_event=True)
+        self._worker = Patvs_Fuction(window=adapter, is_running=True)
 
         def run_monitor():
             try:
@@ -85,4 +85,4 @@ class MonitoringController(QtCore.QObject):
         if thread:
             thread.join(timeout=0)
         if worker:
-            worker.stop_event = False
+            worker.is_running = False

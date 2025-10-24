@@ -171,9 +171,9 @@ class Patvs_Fuction():
         '/': keyboard.KeyCode.from_char('/')
     }
 
-    def __init__(self, window, stop_event):
+    def __init__(self, window, is_running):
         self.window = window
-        self.stop_event = stop_event
+        self.is_running = is_running
         # 读取临时文件
         self.remaining_actions = []
         self.case_id = None
@@ -182,6 +182,7 @@ class Patvs_Fuction():
         self.audio_log_files = []
         self.audio_log_offsets = {}
         self.audio_event_cache = {}
+        self.case_start_time = None
 
     def update_audio_log_files(self, files):
         """更新需要监控的音频日志文件列表。"""
@@ -217,14 +218,14 @@ class Patvs_Fuction():
         )
         remaining = total_seconds
         try:
-            while self.stop_event and remaining > 0:
+            while self.is_running and remaining > 0:
                 wx.CallAfter(
                     self.window.add_log_message,
                     f"倒计时：剩余 {remaining} 秒",
                 )
                 time.sleep(1)
                 remaining -= 1
-            if self.stop_event and remaining == 0:
+            if self.is_running and remaining == 0:
                 wx.CallAfter(
                     self.window.add_log_message,
                     "时间监控已完成，可以提交通过结果",
@@ -245,7 +246,7 @@ class Patvs_Fuction():
         plugged_in_last_state = None
         plug_unplug_cycles = 0
         try:
-            while self.stop_event and plug_unplug_cycles < target_cycles:
+            while self.is_running and plug_unplug_cycles < target_cycles:
                 battery = psutil.sensors_battery()
                 if battery:
                     plugged_in = battery.power_plugged
@@ -351,7 +352,7 @@ class Patvs_Fuction():
         start_time = self._normalize_start_time(start_time)
 
         try:
-            while self.stop_event:
+            while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
                     if hand is None:
@@ -537,7 +538,7 @@ class Patvs_Fuction():
     #     log_num = 0
     #     start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
     #     try:
-    #         while self.stop_event:
+    #         while self.is_running:
     #             if not hand:  # 检查句柄是否有效
     #                 hand = reopen_event_log()
     #                 if hand is None:
@@ -613,7 +614,7 @@ class Patvs_Fuction():
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
-            while self.stop_event:
+            while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
                     if hand is None:
@@ -680,7 +681,7 @@ class Patvs_Fuction():
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
-            while self.stop_event:
+            while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
                     if hand is None:
@@ -747,7 +748,7 @@ class Patvs_Fuction():
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
-            while self.stop_event:
+            while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
                     if hand is None:
@@ -832,8 +833,8 @@ class Patvs_Fuction():
                     return False  # Stop the listener
 
             def stop_listener(listener):
-                # 定期检查 stop_event 和 listener_stopped
-                while self.stop_event and not listener_stopped.is_set():
+                # 定期检查运行状态和 listener_stopped
+                while self.is_running and not listener_stopped.is_set():
                     time.sleep(0.1)  # 检查间隔
 
                 if not listener_stopped.is_set():  # 如果监听器还没停，则停止它
@@ -842,7 +843,7 @@ class Patvs_Fuction():
                     listener_stopped.set()  # 确保事件被设置
 
             with keyboard.Listener(on_press=on_press) as listener:
-                # 启动后台线程以检查 stop_event
+                # 启动后台线程以检查运行状态
                 stop_thread = threading.Thread(target=stop_listener, args=(listener,))
                 stop_thread.start()
                 listener.join()  # 等待监听器停止
@@ -872,8 +873,8 @@ class Patvs_Fuction():
                     return False  # Stop the listener
 
             def stop_listener(listener):
-                # 定期检查 stop_event 和 listener_stopped
-                while self.stop_event and not listener_stopped.is_set():
+                # 定期检查运行状态和 listener_stopped
+                while self.is_running and not listener_stopped.is_set():
                     time.sleep(0.1)  # 检查间隔
 
                 if not listener_stopped.is_set():  # 如果监听器还没停，则停止它
@@ -882,7 +883,7 @@ class Patvs_Fuction():
                     listener_stopped.set()  # 确保事件被设置
 
             with keyboard.Listener(on_press=on_press) as listener:
-                # 启动后台线程以检查 stop_event
+                # 启动后台线程以检查运行状态
                 stop_thread = threading.Thread(target=stop_listener, args=(listener,))
                 stop_thread.start()
                 listener.join()  # 等待监听器停止
@@ -909,8 +910,8 @@ class Patvs_Fuction():
                         return False  # Stop the listener
 
             def stop_listener(listener):
-                # 定期检查 stop_event 和 listener_stopped
-                while self.stop_event and not listener_stopped.is_set():
+                # 定期检查运行状态和 listener_stopped
+                while self.is_running and not listener_stopped.is_set():
                     time.sleep(0.1)  # 检查间隔
 
                 if not listener_stopped.is_set():  # 如果监听器还没停，则停止它
@@ -919,7 +920,7 @@ class Patvs_Fuction():
                     listener_stopped.set()  # 确保事件被设置
 
             with keyboard.Listener(on_click=on_click) as listener:
-                # 启动后台线程以检查 stop_event
+                # 启动后台线程以检查运行状态
                 stop_thread = threading.Thread(target=stop_listener, args=(listener,))
                 stop_thread.start()
                 listener.join()  # 等待监听器停止
@@ -939,7 +940,7 @@ class Patvs_Fuction():
         off_cycle_count = 0
         was_display_on = True
 
-        while self.stop_event and off_cycle_count < target_cycles:
+        while self.is_running and off_cycle_count < target_cycles:
             try:
                 # 获取当前屏幕亮度
                 current_brightness = sbc.get_brightness(display=0)  # 假设只有一个显示器
@@ -965,7 +966,7 @@ class Patvs_Fuction():
                 previous_brightness = None
 
             time.sleep(5)  # 每5秒检测一次
-        if self.stop_event:
+        if self.is_running:
             wx.CallAfter(self.window.add_log_message, "显示器开关次数已达到目标次数，退出监控。")
         else:
             wx.CallAfter(self.window.add_log_message, "退出显示器开关监控。")
@@ -992,7 +993,7 @@ class Patvs_Fuction():
 
         wx.CallAfter(self.window.add_log_message, f"初始系统音量: {previous_volume * 100:.2f}%")
 
-        while self.stop_event and change_count < target_change_count:
+        while self.is_running and change_count < target_change_count:
             time.sleep(1)  # 每秒检测一次
             current_volume = self.get_volume()
 
@@ -1001,7 +1002,7 @@ class Patvs_Fuction():
                 wx.CallAfter(self.window.add_log_message,
                              f"音量变化次数: {change_count}, 当前音量: {current_volume * 100:.2f}%")
                 previous_volume = current_volume
-        if self.stop_event:
+        if self.is_running:
             wx.CallAfter(self.window.add_log_message, "音量变化次数已达到目标次数，退出监控。")
         else:
             wx.CallAfter(self.window.add_log_message, "退出音量加减事件监控。")
@@ -1018,7 +1019,7 @@ class Patvs_Fuction():
         last_camera_state = None  # 上一次的摄像头状态（True: 被调用, False: 未被调用）
         cycle_started = False  # 标记是否进入了一个开关周期
 
-        while self.stop_event and cycle_count < target_cycles:
+        while self.is_running and cycle_count < target_cycles:
             # 尝试打开摄像头
             cap = cv2.VideoCapture(0)
             ret, frame = cap.read()  # 尝试读取帧
@@ -1062,20 +1063,24 @@ class Patvs_Fuction():
         decrypted_data = fernet.decrypt(encrypted_data).decode()
         return decrypted_data
 
-    def load_remaining_actions(self):
+    def load_session_state(self):
         if os.path.exists(self.TEMP_FILE):
             with open(self.TEMP_FILE, 'rb') as file:
                 encrypted_data = file.read()
                 decrypted_data = self.decrypt_data(encrypted_data)
                 data = json.loads(decrypted_data)
-                if data['case_id'] == self.case_id:
-                    return data['actions']
-        return []
+                if data.get('case_id') == self.case_id:
+                    return data.get('actions', []), data.get('start_time')
+        return [], None
 
-    def save_remaining_actions(self):
+    def save_session_state(self):
         logger.warning("开始保存临时文件")
         logger.warning(self.remaining_actions)
-        data = json.dumps({"case_id": self.case_id, "actions": self.remaining_actions})
+        data = json.dumps({
+            "case_id": self.case_id,
+            "actions": self.remaining_actions,
+            "start_time": self.case_start_time,
+        })
         encrypted_data = self.encrypt_data(data)
         with open(self.TEMP_FILE, 'wb') as file:
             file.write(encrypted_data)
@@ -1091,9 +1096,15 @@ class Patvs_Fuction():
     def run_main(self, case_id, action_and_num, start_time):
         try:
             self.case_id = case_id
-            self.remaining_actions = self.load_remaining_actions()
-            if not self.remaining_actions:
-                self.remaining_actions = action_and_num
+            stored_actions, stored_start_time = self.load_session_state()
+            self.remaining_actions = stored_actions or action_and_num
+
+            case_start_time = stored_start_time or start_time
+            if isinstance(case_start_time, datetime.datetime):
+                case_start_time = case_start_time.isoformat()
+            if not case_start_time:
+                case_start_time = datetime.datetime.now().isoformat()
+            self.case_start_time = case_start_time
 
             # 显示日志信息
             wx.CallAfter(self.window.add_log_message, f"请按照提示依次执行以下动作:")
@@ -1103,12 +1114,12 @@ class Patvs_Fuction():
                 else:
                     wx.CallAfter(self.window.add_log_message, f"您选择的动作是: {action}，目标测试次数: {test_num}")
             for action, test_num in self.remaining_actions:
-                if self.stop_event:
+                if self.is_running:
                     display_action = action
                     action = self.normalize_action(action)
                     test_num = float(test_num)
                     # 在每个动作开始前更新临时文件
-                    self.save_remaining_actions()
+                    self.save_session_state()
                     # 清除上一个动作的完成状态
                     self.action_complete.clear()
                     if '时间' in action:
@@ -1137,26 +1148,31 @@ class Patvs_Fuction():
                         threading.Thread(target=self.monitor_mouse_clicks, args=(test_num,)).start()
                     elif action == 's3':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.test_count_s3_sleep_events, args=(start_time, test_num,)).start()
+                        threading.Thread(target=self.test_count_s3_sleep_events,
+                                         args=(self.case_start_time, test_num,)).start()
                     elif action == 's4':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.test_count_s4_sleep_events, args=(start_time, test_num,)).start()
+                        threading.Thread(target=self.test_count_s4_sleep_events,
+                                         args=(self.case_start_time, test_num,)).start()
                     elif action == 's5':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.test_count_s5_sleep_events, args=(start_time, test_num,)).start()
+                        threading.Thread(target=self.test_count_s5_sleep_events,
+                                         args=(self.case_start_time, test_num,)).start()
                     elif action == 'restart':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.test_count_restart_events, args=(start_time, test_num,)).start()
+                        threading.Thread(target=self.test_count_restart_events,
+                                         args=(self.case_start_time, test_num,)).start()
                     elif action.lower() in self.KEY_MAPPING:
                         wx.CallAfter(self.window.add_log_message,
                                      f"开始执行监控按键: {action}，目标测试次数: {test_num}")
                         threading.Thread(target=self.monitor_keystrokes2, args=(test_num, action,)).start()
                     elif action == 's3插拔':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_s3_and_usb, args=(start_time, test_num, test_num)).start()
+                        threading.Thread(target=self.monitor_s3_and_usb,
+                                         args=(self.case_start_time, test_num, test_num)).start()
                     elif action == 's3电源插拔':
                         threading.Thread(target=self.monitor_s3_and_power,
-                                         args=(start_time, test_num)).start()
+                                         args=(self.case_start_time, test_num)).start()
                     elif action == '显示器':
                         wx.CallAfter(self.window.add_log_message,
                                      f"开始执行监控: {action} 开关事件，目标测试次数: {test_num}")
@@ -1187,7 +1203,7 @@ class Patvs_Fuction():
                     wx.CallAfter(self.window.add_log_message, f"动作 {action} 完成")
                     # 动作完成后，移除已执行的动作并保存
                     self.remaining_actions = self.remaining_actions[1:]
-                    self.save_remaining_actions()
+                    self.save_session_state()
                 else:
                     logger.warning("事项block，退出执行")
                     self.remaining_actions = []
@@ -1202,7 +1218,7 @@ class Patvs_Fuction():
             logger.error(f"未知错误: {e}")
 
     def on_close(self, event):
-        self.save_remaining_actions()
+        self.save_session_state()
         self.window.Destroy()
         wx.GetApp().ExitMainLoop()
 
@@ -1266,7 +1282,7 @@ class Patvs_Fuction():
                     f"音频事件 {display_action or action_key} 当前已有计数 {current_count}/{target_count}。"
                 )
 
-            while self.stop_event and current_count < target_count:
+            while self.is_running and current_count < target_count:
                 progress_made = False
                 for path, file_obj in open_files:
                     line = file_obj.readline()
@@ -1284,9 +1300,9 @@ class Patvs_Fuction():
                                     )
                         line = file_obj.readline()
                     self.audio_log_offsets[path] = file_obj.tell()
-                    if current_count >= target_count or not self.stop_event:
+                    if current_count >= target_count or not self.is_running:
                         break
-                if current_count >= target_count or not self.stop_event:
+                if current_count >= target_count or not self.is_running:
                     break
                 if not progress_made:
                     time.sleep(0.5)
