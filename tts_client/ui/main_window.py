@@ -757,6 +757,63 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     # ------------------------------------------------------------------
+    def _clear_project_combo(self) -> None:
+        blocker = QtCore.QSignalBlocker(self._project_combo)
+        self._project_combo.clear()
+        self._project_combo.setEnabled(bool(self._projects))
+
+    def _clear_plan_combo(self) -> None:
+        blocker = QtCore.QSignalBlocker(self._plan_combo)
+        self._plan_combo.clear()
+        self._plan_combo.setEnabled(bool(self._plans))
+
+    def _clear_project_and_plan(self) -> None:
+        self._clear_project_combo()
+        self._clear_plan_combo()
+
+    def _populate_project_combo(self) -> None:
+        self._clear_project_combo()
+        if not self._projects:
+            self._restore_project_id = None
+            self._plans = []
+            self._clear_plan_combo()
+            return
+
+        with QtCore.QSignalBlocker(self._project_combo):
+            for project in self._projects:
+                self._project_combo.addItem(project.name, project.id)
+
+        target_index = 0
+        if self._restore_project_id is not None:
+            restored_index = self._project_combo.findData(self._restore_project_id)
+            if restored_index >= 0:
+                target_index = restored_index
+
+        self._restore_project_id = None
+        self._project_combo.setEnabled(True)
+        self._project_combo.setCurrentIndex(target_index)
+
+    def _populate_plan_combo(self) -> None:
+        self._clear_plan_combo()
+        if not self._plans:
+            self._restore_plan_id = None
+            return
+
+        with QtCore.QSignalBlocker(self._plan_combo):
+            for plan in self._plans:
+                self._plan_combo.addItem(plan.name, plan.id)
+
+        target_index = 0
+        if self._restore_plan_id is not None:
+            restored_index = self._plan_combo.findData(self._restore_plan_id)
+            if restored_index >= 0:
+                target_index = restored_index
+
+        self._restore_plan_id = None
+        self._plan_combo.setEnabled(True)
+        self._plan_combo.setCurrentIndex(target_index)
+
+    # ------------------------------------------------------------------
     def _load_departments(self) -> None:
         try:
             self._departments = self._api.get_departments()
@@ -782,56 +839,75 @@ class MainWindow(QtWidgets.QMainWindow):
             self._restore_department_id = None
         self.save_state()
 
-    def _on_department_changed(self, index: int) -> None:
+    def _on_department_changed(self, _index: object) -> None:
+        index = self._department_combo.currentIndex()
         if index < 0 or index >= len(self._departments):
+            self._projects = []
+            self._plans = []
+            self._clear_project_and_plan()
+            self.save_state()
             return
-        dept_id = self._department_combo.currentData()
+
+        dept = self._departments[index]
+        dept_id = self._int_or_none(self._department_combo.currentData())
+        if dept_id is None:
+            self._logger.warning("部门 %s 缺少有效 ID", dept.name)
+            return
+
+        self._logger.info("选择部门 %s (ID: %s)", dept.name, dept_id)
+
         try:
             self._projects = self._api.get_projects(int(dept_id))
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载项目失败", str(exc))
+            self._projects = []
+            self._plans = []
+            self._clear_project_and_plan()
             return
-        self._project_combo.blockSignals(True)
-        self._project_combo.clear()
-        for project in self._projects:
-            self._project_combo.addItem(project.name, project.id)
-        self._project_combo.blockSignals(False)
-        if self._projects:
-            target_index = 0
-            if self._restore_project_id is not None:
-                restored_index = self._project_combo.findData(self._restore_project_id)
-                if restored_index >= 0:
-                    target_index = restored_index
-            self._project_combo.setCurrentIndex(target_index)
-            self._restore_project_id = None
+
+        self._populate_project_combo()
         self.save_state()
 
-    def _on_project_changed(self, index: int) -> None:
+    def _on_project_changed(self, _index: object) -> None:
+        index = self._project_combo.currentIndex()
         if index < 0 or index >= len(self._projects):
+            self._plans = []
+            self._clear_plan_combo()
+            self.save_state()
             return
-        project_id = self._project_combo.currentData()
-        dept_id = self._department_combo.currentData()
+
+        project = self._projects[index]
+        project_id = self._int_or_none(self._project_combo.currentData())
+        dept_id = self._int_or_none(self._department_combo.currentData())
+        if project_id is None or dept_id is None:
+            self._logger.warning(
+                "项目 %s 缺少有效 ID (项目: %s, 部门: %s)",
+                project.name,
+                project_id,
+                dept_id,
+            )
+            return
+
+        self._logger.info(
+            "选择项目 %s (ID: %s) 于部门 %s",
+            project.name,
+            project_id,
+            dept_id,
+        )
+
         try:
             self._plans = self._api.get_test_plans(int(dept_id), int(project_id))
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载计划失败", str(exc))
+            self._plans = []
+            self._clear_plan_combo()
             return
-        self._plan_combo.blockSignals(True)
-        self._plan_combo.clear()
-        for plan in self._plans:
-            self._plan_combo.addItem(plan.name, plan.id)
-        self._plan_combo.blockSignals(False)
-        if self._plans:
-            target_index = 0
-            if self._restore_plan_id is not None:
-                restored_index = self._plan_combo.findData(self._restore_plan_id)
-                if restored_index >= 0:
-                    target_index = restored_index
-            self._plan_combo.setCurrentIndex(target_index)
-            self._restore_plan_id = None
+
+        self._populate_plan_combo()
         self.save_state()
 
-    def _on_plan_changed(self, index: int) -> None:
+    def _on_plan_changed(self, _index: object) -> None:
+        index = self._plan_combo.currentIndex()
         if index < 0 or index >= len(self._plans):
             self._pending_filter_state = None
             self._cases = []
