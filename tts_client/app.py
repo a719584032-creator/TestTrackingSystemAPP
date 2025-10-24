@@ -66,17 +66,17 @@ def main() -> int:
     window = MainWindow(api_client, monitoring, window_state, user_info)
     window.show()
 
-    try:
-        update_info = updater.check()
-    except NetworkError as exc:
-        logger.warning("OTA 检查失败: %s", exc)
-    else:
-        if update_info:
-            QtWidgets.QMessageBox.information(
-                window,
-                "发现新版本",
-                f"检测到新版本 {update_info.version}\n{update_info.release_notes}\n请访问 OTA 服务器下载: {update_info.download_url}",
-            )
+    # try:
+    #     update_info = updater.check()
+    # except NetworkError as exc:
+    #     logger.warning("OTA 检查失败: %s", exc)
+    # else:
+    #     if update_info:
+    #         QtWidgets.QMessageBox.information(
+    #             window,
+    #             "发现新版本",
+    #             f"检测到新版本 {update_info.version}\n{update_info.release_notes}\n请访问 OTA 服务器下载: {update_info.download_url}",
+    #         )
 
     return app.exec_()
 

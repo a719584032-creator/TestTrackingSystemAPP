@@ -601,7 +601,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
-        self._block_btn.clicked.connect(lambda: self._submit_result("blocked"))
+        self._block_btn.clicked.connect(lambda: self._submit_result("block"))
 
         self._monitoring.log_generated.connect(self._append_log)
         self._monitoring.monitoring_finished.connect(self._on_monitoring_finished)
