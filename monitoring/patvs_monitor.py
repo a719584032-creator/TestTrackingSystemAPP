@@ -3,6 +3,7 @@
 from PyQt5 import QtCore
 import logging
 import math
+from typing import Callable
 
 from .devicerm import Notification
 from .lock_screen import monitor_locks
@@ -418,8 +419,7 @@ class Patvs_Fuction():
             s3_done_event = threading.Event()
             s3_thread = threading.Thread(
                 target=self.test_count_s3_sleep_events,
-                args=(start_time, i + 1),
-                kwargs={"s3_done_event": s3_done_event},
+                args=(start_time, i + 1, s3_done_event),
             )
             s3_thread.start()
             s3_done_event.wait()
@@ -467,37 +467,39 @@ class Patvs_Fuction():
     #     power_thread.join()
     #     wx.CallAfter(self.window.add_log_message, "S3 和 电源 插拔监控已完成。")
 
-    def test_count_s3_sleep_events(self, start_time, target_cycles, remaining_cycles=None, s3_done_event=None):
-        if isinstance(remaining_cycles, threading.Event):
-            s3_done_event = remaining_cycles
-            remaining_cycles = None
+    def test_count_s3_sleep_events(self, start_time, target_cycles, s3_done_event=None):
         try:
             target_cycles = float(target_cycles)
         except (TypeError, ValueError):
             target_cycles = 0.0
-        if remaining_cycles is None:
-            remaining_cycles = target_cycles
-        try:
-            remaining_cycles = float(remaining_cycles)
-        except (TypeError, ValueError):
-            remaining_cycles = target_cycles
         if target_cycles <= 0:
             wx.CallAfter(self.window.add_log_message, "S3 目标次数为 0，自动跳过。")
-            self._record_count_progress(0, 0, action_key='s3')
             if s3_done_event:
                 s3_done_event.set()
             else:
                 self.action_complete.set()
             return
-        completed_initial = max(0, int(target_cycles - remaining_cycles))
-        if remaining_cycles <= 0:
-            wx.CallAfter(self.window.add_log_message, f"S3 已完成目标次数 {int(target_cycles)}，自动跳过。")
-            self._record_count_progress(target_cycles, target_cycles, action_key='s3')
+
+        start_time, total, last_record_number = self._bootstrap_event_progress(
+            start_time, lambda event: event.EventID in (507, 107)
+        )
+        log_num = total
+        if total:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
+            )
+        if total >= target_cycles:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"已完成目标S3次数: {int(total)}",
+            )
             if s3_done_event:
                 s3_done_event.set()
             else:
                 self.action_complete.set()
             return
+
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -511,17 +513,8 @@ class Patvs_Fuction():
             return  # 如果无法打开句柄，退出
 
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = completed_initial
-        log_num = 0
-        start_time = self._normalize_start_time(start_time)
 
         try:
-            if total > 0:
-                wx.CallAfter(
-                    self.window.add_log_message,
-                    f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
-                )
-                self._record_count_progress(target_cycles, total, action_key='s3')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -534,7 +527,6 @@ class Patvs_Fuction():
                         # 关闭当前句柄并重新打开
                         win32evtlog.CloseEventLog(hand)
                         hand = reopen_event_log()
-                        total = 0
                         time.sleep(1)
                         continue
                 except Exception as e:
@@ -545,16 +537,17 @@ class Patvs_Fuction():
                         except Exception as close_e:
                             logger.warning(f"Error closing event log: {close_e}")
                     hand = reopen_event_log()
-                    total = 0
                     time.sleep(1)
                     continue
 
                 for event in events:
                     if event.EventID in (507, 107):
                         occurred_time = event.TimeGenerated
-                        if occurred_time > start_time:
+                        record_number = getattr(event, "RecordNumber", 0) or 0
+                        if occurred_time > start_time and record_number > last_record_number:
                             total += 1
-                            self._record_count_progress(target_cycles, total, action_key='s3')
+                            if record_number > last_record_number:
+                                last_record_number = record_number
 
                 # 输出增量日志，如果total比上一次记录的last_total大，则说明有新日志
                 if total > log_num:
@@ -620,6 +613,45 @@ class Patvs_Fuction():
         logger.error(f"Unsupported start_time format: {start_time}, defaulting to current time.")
         return datetime.datetime.now()
 
+    def _bootstrap_event_progress(self, start_time, match_event: Callable[[object], bool]):
+        """Return normalized start time, existing count, and last record id."""
+
+        normalized_start = self._normalize_start_time(start_time)
+        count = 0
+        last_record_number = 0
+        handle = None
+        flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+
+        try:
+            handle = win32evtlog.OpenEventLog(None, "System")
+        except Exception as exc:
+            logger.warning(f"Failed to open event log for bootstrap scan: {exc}")
+            return normalized_start, 0, 0
+
+        try:
+            while True:
+                events = win32evtlog.ReadEventLog(handle, flags, 0)
+                if not events:
+                    break
+                for event in events:
+                    if match_event(event):
+                        occurred_time = event.TimeGenerated
+                        if occurred_time > normalized_start:
+                            count += 1
+                            record_number = getattr(event, "RecordNumber", 0) or 0
+                            if record_number > last_record_number:
+                                last_record_number = record_number
+        except Exception as exc:
+            logger.warning(f"Error scanning existing events: {exc}")
+        finally:
+            if handle:
+                try:
+                    win32evtlog.CloseEventLog(handle)
+                except Exception as close_exc:
+                    logger.warning(f"Error closing bootstrap event log: {close_exc}")
+
+        return normalized_start, count, last_record_number
+
     def parse_time(self, time_str):
         time_str = time_str.strip()  # 移除空格
         try:
@@ -647,8 +679,7 @@ class Patvs_Fuction():
         # 启动 S3 和 USB 的监控线程
         s3_thread = threading.Thread(
             target=self.test_count_s3_sleep_events,
-            args=(start_time, s3_target_cycles),
-            kwargs={"s3_done_event": s3_done_event},
+            args=(start_time, s3_target_cycles, s3_done_event),
         )
         usb_thread = threading.Thread(
             target=self.monitor_device_plug_changes,
@@ -773,28 +804,30 @@ class Patvs_Fuction():
     #             except Exception as e:
     #                 logger.warning(f"S4 Final close error: {e}")
     #         self.action_complete.set()  # 设置动作完成状态
-    def test_count_s4_sleep_events(self, start_time, target_cycles, remaining_cycles=None):
+    def test_count_s4_sleep_events(self, start_time, target_cycles):
         try:
             target_cycles = float(target_cycles)
         except (TypeError, ValueError):
             target_cycles = 0.0
-        if remaining_cycles is None:
-            remaining_cycles = target_cycles
-        try:
-            remaining_cycles = float(remaining_cycles)
-        except (TypeError, ValueError):
-            remaining_cycles = target_cycles
         if target_cycles <= 0:
             wx.CallAfter(self.window.add_log_message, "S4 目标次数为 0，自动跳过。")
-            self._record_count_progress(0, 0, action_key='s4')
             self.action_complete.set()
             return
-        completed_initial = max(0, int(target_cycles - remaining_cycles))
-        if remaining_cycles <= 0:
-            wx.CallAfter(self.window.add_log_message, f"S4 已完成目标次数 {int(target_cycles)}，自动跳过。")
-            self._record_count_progress(target_cycles, target_cycles, action_key='s4')
+
+        start_time, total, last_record_number = self._bootstrap_event_progress(
+            start_time, lambda event: event.EventID == 42
+        )
+        log_num = total
+        if total:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
+            )
+        if total >= target_cycles:
+            wx.CallAfter(self.window.add_log_message, f"已完成目标S4次数: {int(total)}")
             self.action_complete.set()
             return
+
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -807,14 +840,7 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = completed_initial
-        log_num = 0
-        start_time = self._normalize_start_time(start_time)
         try:
-            if total > 0:
-                wx.CallAfter(self.window.add_log_message,
-                             f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
-                self._record_count_progress(target_cycles, total, action_key='s4')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -827,7 +853,6 @@ class Patvs_Fuction():
                         # 关闭当前句柄并重新打开
                         win32evtlog.CloseEventLog(hand)
                         hand = reopen_event_log()
-                        total = 0
                         time.sleep(1)
                         continue
                 except Exception as e:
@@ -838,16 +863,17 @@ class Patvs_Fuction():
                         except Exception as close_e:
                             logger.warning(f"Error closing event log: {close_e}")
                     hand = reopen_event_log()
-                    total = 0
                     time.sleep(1)
                     continue
 
                 for event in events:
                     if event.EventID == 42:
                         occurred_time = event.TimeGenerated
-                        if occurred_time > start_time:
+                        record_number = getattr(event, "RecordNumber", 0) or 0
+                        if occurred_time > start_time and record_number > last_record_number:
                             total += 1
-                            self._record_count_progress(target_cycles, total, action_key='s4')
+                            if record_number > last_record_number:
+                                last_record_number = record_number
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(self.window.add_log_message,
@@ -866,28 +892,30 @@ class Patvs_Fuction():
                     logger.warning(f"S4 Final close error: {e}")
             self.action_complete.set()  # 设置动作完成状态
 
-    def test_count_s5_sleep_events(self, start_time, target_cycles, remaining_cycles=None):
+    def test_count_s5_sleep_events(self, start_time, target_cycles):
         try:
             target_cycles = float(target_cycles)
         except (TypeError, ValueError):
             target_cycles = 0.0
-        if remaining_cycles is None:
-            remaining_cycles = target_cycles
-        try:
-            remaining_cycles = float(remaining_cycles)
-        except (TypeError, ValueError):
-            remaining_cycles = target_cycles
         if target_cycles <= 0:
             wx.CallAfter(self.window.add_log_message, "S5 目标次数为 0，自动跳过。")
-            self._record_count_progress(0, 0, action_key='s5')
             self.action_complete.set()
             return
-        completed_initial = max(0, int(target_cycles - remaining_cycles))
-        if remaining_cycles <= 0:
-            wx.CallAfter(self.window.add_log_message, f"S5 已完成目标次数 {int(target_cycles)}，自动跳过。")
-            self._record_count_progress(target_cycles, target_cycles, action_key='s5')
+
+        start_time, total, last_record_number = self._bootstrap_event_progress(
+            start_time, lambda event: event.EventID == 7001
+        )
+        log_num = total
+        if total:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"S5 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
+            )
+        if total >= target_cycles:
+            wx.CallAfter(self.window.add_log_message, f"已完成目标S5次数: {int(total)}")
             self.action_complete.set()
             return
+
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -900,14 +928,7 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = completed_initial
-        log_num = 0
-        start_time = self._normalize_start_time(start_time)
         try:
-            if total > 0:
-                wx.CallAfter(self.window.add_log_message,
-                             f"S5 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
-                self._record_count_progress(target_cycles, total, action_key='s5')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -920,7 +941,6 @@ class Patvs_Fuction():
                         # 关闭当前句柄并重新打开
                         win32evtlog.CloseEventLog(hand)
                         hand = reopen_event_log()
-                        total = 0
                         time.sleep(1)
                         continue
                 except Exception as e:
@@ -931,20 +951,23 @@ class Patvs_Fuction():
                         except Exception as close_e:
                             logger.warning(f"Error closing event log: {close_e}")
                     hand = reopen_event_log()
-                    total = 0
                     time.sleep(1)
                     continue
 
                 for event in events:
                     if event.EventID == 7001:
                         occurred_time = event.TimeGenerated
-                        if occurred_time > start_time:
+                        record_number = getattr(event, "RecordNumber", 0) or 0
+                        if occurred_time > start_time and record_number > last_record_number:
                             total += 1
-                            self._record_count_progress(target_cycles, total, action_key='s5')
+                            if record_number > last_record_number:
+                                last_record_number = record_number
                 # 仅输出增量日志
                 if total > log_num:
-                    wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
+                    wx.CallAfter(
+                        self.window.add_log_message,
+                        f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。",
+                    )
                     log_num = total
                 if total >= target_cycles:
                     wx.CallAfter(self.window.add_log_message,
@@ -959,28 +982,30 @@ class Patvs_Fuction():
                     logger.warning(f"S5 Final close error: {e}")
             self.action_complete.set()  # 设置动作完成状态
 
-    def test_count_restart_events(self, start_time, target_cycles, remaining_cycles=None):
+    def test_count_restart_events(self, start_time, target_cycles):
         try:
             target_cycles = float(target_cycles)
         except (TypeError, ValueError):
             target_cycles = 0.0
-        if remaining_cycles is None:
-            remaining_cycles = target_cycles
-        try:
-            remaining_cycles = float(remaining_cycles)
-        except (TypeError, ValueError):
-            remaining_cycles = target_cycles
         if target_cycles <= 0:
             wx.CallAfter(self.window.add_log_message, "restart 目标次数为 0，自动跳过。")
-            self._record_count_progress(0, 0, action_key='restart')
             self.action_complete.set()
             return
-        completed_initial = max(0, int(target_cycles - remaining_cycles))
-        if remaining_cycles <= 0:
-            wx.CallAfter(self.window.add_log_message, f"restart 已完成目标次数 {int(target_cycles)}，自动跳过。")
-            self._record_count_progress(target_cycles, target_cycles, action_key='restart')
+
+        start_time, total, last_record_number = self._bootstrap_event_progress(
+            start_time, lambda event: (event.EventID & 0xFFFF) == 1074
+        )
+        log_num = total
+        if total:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"restart 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
+            )
+        if total >= target_cycles:
+            wx.CallAfter(self.window.add_log_message, f"已完成目标 restart 次数: {int(total)}")
             self.action_complete.set()
             return
+
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -993,14 +1018,7 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = completed_initial
-        log_num = 0
-        start_time = self._normalize_start_time(start_time)
         try:
-            if total > 0:
-                wx.CallAfter(self.window.add_log_message,
-                             f"restart 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
-                self._record_count_progress(target_cycles, total, action_key='restart')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -1013,7 +1031,6 @@ class Patvs_Fuction():
                         # 关闭当前句柄并重新打开
                         win32evtlog.CloseEventLog(hand)
                         hand = reopen_event_log()
-                        total = 0
                         time.sleep(1)
                         continue
                 except Exception as e:
@@ -1024,20 +1041,23 @@ class Patvs_Fuction():
                         except Exception as close_e:
                             logger.warning(f"Error closing event log: {close_e}")
                     hand = reopen_event_log()
-                    total = 0
                     time.sleep(1)
                     continue
                 for event in events:
                     event_id = event.EventID & 0xFFFF  # 掩码EventID以获取实际值
                     if event_id == 1074:
                         occurred_time = event.TimeGenerated
-                        if occurred_time > start_time:
+                        record_number = getattr(event, "RecordNumber", 0) or 0
+                        if occurred_time > start_time and record_number > last_record_number:
                             total += 1
-                            self._record_count_progress(target_cycles, total, action_key='restart')
+                            if record_number > last_record_number:
+                                last_record_number = record_number
                 # 仅输出增量日志
                 if total > log_num:
-                    wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
+                    wx.CallAfter(
+                        self.window.add_log_message,
+                        f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。",
+                    )
                     log_num = total
                 if total >= target_cycles:
                     wx.CallAfter(self.window.add_log_message,
@@ -1458,24 +1478,28 @@ class Patvs_Fuction():
                         threading.Thread(target=self.monitor_mouse_clicks, args=(target_value,)).start()
                     elif normalized_action == 's3':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
-                        threading.Thread(target=self.test_count_s3_sleep_events,
-                                         args=(self.case_start_time, target_value,),
-                                         kwargs={"remaining_cycles": remaining_value}).start()
+                        threading.Thread(
+                            target=self.test_count_s3_sleep_events,
+                            args=(self.case_start_time, target_value),
+                        ).start()
                     elif normalized_action == 's4':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
-                        threading.Thread(target=self.test_count_s4_sleep_events,
-                                         args=(self.case_start_time, target_value,),
-                                         kwargs={"remaining_cycles": remaining_value}).start()
+                        threading.Thread(
+                            target=self.test_count_s4_sleep_events,
+                            args=(self.case_start_time, target_value),
+                        ).start()
                     elif normalized_action == 's5':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
-                        threading.Thread(target=self.test_count_s5_sleep_events,
-                                         args=(self.case_start_time, target_value,),
-                                         kwargs={"remaining_cycles": remaining_value}).start()
+                        threading.Thread(
+                            target=self.test_count_s5_sleep_events,
+                            args=(self.case_start_time, target_value),
+                        ).start()
                     elif normalized_action == 'restart':
                         wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
-                        threading.Thread(target=self.test_count_restart_events,
-                                         args=(self.case_start_time, target_value,),
-                                         kwargs={"remaining_cycles": remaining_value}).start()
+                        threading.Thread(
+                            target=self.test_count_restart_events,
+                            args=(self.case_start_time, target_value),
+                        ).start()
                     elif normalized_action.lower() in self.KEY_MAPPING:
                         wx.CallAfter(self.window.add_log_message,
                                      f"开始执行监控按键: {action}，目标测试次数: {target_value:g}")
