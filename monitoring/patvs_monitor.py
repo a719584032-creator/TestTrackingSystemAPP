@@ -183,6 +183,122 @@ class Patvs_Fuction():
         self.audio_log_offsets = {}
         self.audio_event_cache = {}
         self.case_start_time = None
+        self.state_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    def _build_action_state(self, action, amount):
+        """Normalize action definition for persistence and progress tracking."""
+
+        normalized = {
+            "name": action,
+            "unit": "count",
+        }
+        try:
+            numeric_amount = float(amount)
+        except (TypeError, ValueError):
+            numeric_amount = 0.0
+        action_key = action.strip().lower()
+        if "时间" in action or action_key == "time":
+            seconds = max(0, int(math.ceil(numeric_amount * 60)))
+            normalized.update({
+                "target": float(seconds),
+                "remaining": float(seconds),
+                "unit": "seconds",
+            })
+        else:
+            normalized.update({
+                "target": float(max(0.0, numeric_amount)),
+                "remaining": float(max(0.0, numeric_amount)),
+            })
+        return normalized
+
+    def _normalize_stored_action(self, action):
+        """Coerce stored session data into the normalized dictionary format."""
+
+        if isinstance(action, dict):
+            name = action.get("name") or action.get("action")
+            if not name:
+                return None
+            unit = action.get("unit", "count")
+            try:
+                target = float(action.get("target", 0))
+            except (TypeError, ValueError):
+                target = 0.0
+            try:
+                remaining = float(action.get("remaining", target))
+            except (TypeError, ValueError):
+                remaining = target
+            normalized = {
+                "name": name,
+                "unit": unit if unit in {"count", "seconds"} else "count",
+                "target": max(0.0, target),
+                "remaining": max(0.0, remaining),
+            }
+            name_key = str(name).strip().lower()
+            if (
+                normalized["unit"] == "seconds"
+                and normalized["target"]
+                and "时间" not in str(name)
+                and name_key != "time"
+            ):
+                # Old data may have been stored with mismatched metadata.
+                normalized["unit"] = "count"
+            return normalized
+        if isinstance(action, (list, tuple)) and len(action) == 2:
+            return self._build_action_state(action[0], action[1])
+        return None
+
+    def _update_current_action_remaining(self, remaining):
+        updated = False
+        with self.state_lock:
+            if self.remaining_actions:
+                self.remaining_actions[0]["remaining"] = max(0.0, float(remaining))
+                updated = True
+        if updated:
+            self.save_session_state()
+
+    def _complete_current_action(self):
+        removed = False
+        with self.state_lock:
+            if self.remaining_actions:
+                self.remaining_actions = self.remaining_actions[1:]
+                removed = True
+        if removed:
+            self.save_session_state()
+
+    def _record_count_progress(self, target, completed, action_key=None):
+        if action_key is not None:
+            with self.state_lock:
+                current_name = (
+                    self.remaining_actions[0]["name"]
+                    if self.remaining_actions
+                    else None
+                )
+            if current_name is None or self.normalize_action(current_name) != action_key:
+                return
+        try:
+            remaining = float(target) - float(completed)
+        except (TypeError, ValueError):
+            remaining = 0.0
+        self._update_current_action_remaining(max(0.0, remaining))
+
+    def _record_time_progress(self, remaining_seconds):
+        with self.state_lock:
+            current_name = (
+                self.remaining_actions[0]["name"]
+                if self.remaining_actions
+                else None
+            )
+        if current_name is None:
+            return
+        normalized = self.normalize_action(current_name)
+        if "时间" not in current_name and normalized != "time":
+            return
+        try:
+            remaining = max(0, int(math.ceil(float(remaining_seconds))))
+        except (TypeError, ValueError):
+            remaining = 0
+        self._update_current_action_remaining(remaining)
 
     def update_audio_log_files(self, files):
         """更新需要监控的音频日志文件列表。"""
@@ -197,26 +313,41 @@ class Patvs_Fuction():
                 self.audio_log_offsets[path] = position
         self.audio_event_cache = {}
 
-    def monitor_time(self, num_time):
-        """
-        监控时间
-        """
+    def monitor_time(self, remaining_seconds, total_seconds):
+        """监控时间关键字，支持断点续跑。"""
+
         try:
-            minutes = float(num_time)
+            total_seconds = max(0, int(math.ceil(float(total_seconds))))
         except (TypeError, ValueError):
-            minutes = 0.0
-        minutes = max(0.0, minutes)
-        total_seconds = max(0, math.ceil(minutes * 60))
+            total_seconds = 0
+        try:
+            remaining = max(0, int(math.ceil(float(remaining_seconds))))
+        except (TypeError, ValueError):
+            remaining = total_seconds
         if total_seconds == 0:
             wx.CallAfter(self.window.add_log_message, "时间关键字为 0，视为立即完成。")
             wx.CallAfter(self.window.add_log_message, "时间监控已完成，可以提交通过结果")
+            self._record_time_progress(0)
             self.action_complete.set()
             return
-        wx.CallAfter(
-            self.window.add_log_message,
-            f"该用例需要执行 {minutes:g} 分钟，共 {total_seconds} 秒。",
-        )
-        remaining = total_seconds
+        spent = total_seconds - remaining
+        minutes = total_seconds / 60
+        if remaining <= 0:
+            wx.CallAfter(self.window.add_log_message, "时间监控剩余时间为 0，视为已完成。")
+            wx.CallAfter(self.window.add_log_message, "时间监控已完成，可以提交通过结果")
+            self._record_time_progress(0)
+            self.action_complete.set()
+            return
+        if spent > 0:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"时间监控已累计执行 {spent} 秒，剩余 {remaining} 秒。",
+            )
+        else:
+            wx.CallAfter(
+                self.window.add_log_message,
+                f"该用例需要执行 {minutes:g} 分钟，共 {total_seconds} 秒。",
+            )
         try:
             while self.is_running and remaining > 0:
                 wx.CallAfter(
@@ -225,6 +356,7 @@ class Patvs_Fuction():
                 )
                 time.sleep(1)
                 remaining -= 1
+                self._record_time_progress(remaining)
             if self.is_running and remaining == 0:
                 wx.CallAfter(
                     self.window.add_log_message,
@@ -234,6 +366,7 @@ class Patvs_Fuction():
                 wx.CallAfter(self.window.add_log_message, "时间监控已停止")
         finally:
             wx.CallAfter(self.window.add_log_message, "已停止测试时间监控")
+            self._record_time_progress(remaining)
             self.action_complete.set()  # 设置动作完成状态
 
     def monitor_power_plug_changes(self, target_cycles, power_done_event=None):
@@ -285,7 +418,8 @@ class Patvs_Fuction():
             s3_done_event = threading.Event()
             s3_thread = threading.Thread(
                 target=self.test_count_s3_sleep_events,
-                args=(start_time, i+1, s3_done_event)
+                args=(start_time, i + 1),
+                kwargs={"s3_done_event": s3_done_event},
             )
             s3_thread.start()
             s3_done_event.wait()
@@ -333,7 +467,37 @@ class Patvs_Fuction():
     #     power_thread.join()
     #     wx.CallAfter(self.window.add_log_message, "S3 和 电源 插拔监控已完成。")
 
-    def test_count_s3_sleep_events(self, start_time, target_cycles, s3_done_event=None):
+    def test_count_s3_sleep_events(self, start_time, target_cycles, remaining_cycles=None, s3_done_event=None):
+        if isinstance(remaining_cycles, threading.Event):
+            s3_done_event = remaining_cycles
+            remaining_cycles = None
+        try:
+            target_cycles = float(target_cycles)
+        except (TypeError, ValueError):
+            target_cycles = 0.0
+        if remaining_cycles is None:
+            remaining_cycles = target_cycles
+        try:
+            remaining_cycles = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining_cycles = target_cycles
+        if target_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, "S3 目标次数为 0，自动跳过。")
+            self._record_count_progress(0, 0, action_key='s3')
+            if s3_done_event:
+                s3_done_event.set()
+            else:
+                self.action_complete.set()
+            return
+        completed_initial = max(0, int(target_cycles - remaining_cycles))
+        if remaining_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, f"S3 已完成目标次数 {int(target_cycles)}，自动跳过。")
+            self._record_count_progress(target_cycles, target_cycles, action_key='s3')
+            if s3_done_event:
+                s3_done_event.set()
+            else:
+                self.action_complete.set()
+            return
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -347,11 +511,17 @@ class Patvs_Fuction():
             return  # 如果无法打开句柄，退出
 
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = 0
+        total = completed_initial
         log_num = 0
         start_time = self._normalize_start_time(start_time)
 
         try:
+            if total > 0:
+                wx.CallAfter(
+                    self.window.add_log_message,
+                    f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。",
+                )
+                self._record_count_progress(target_cycles, total, action_key='s3')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -384,16 +554,21 @@ class Patvs_Fuction():
                         occurred_time = event.TimeGenerated
                         if occurred_time > start_time:
                             total += 1
+                            self._record_count_progress(target_cycles, total, action_key='s3')
 
                 # 输出增量日志，如果total比上一次记录的last_total大，则说明有新日志
                 if total > log_num:
-                    wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试S3 {total} 次，目标次数为 {target_cycles} 次。")
+                    wx.CallAfter(
+                        self.window.add_log_message,
+                        f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。",
+                    )
                     log_num = total
 
                 if total >= target_cycles:
-                    wx.CallAfter(self.window.add_log_message,
-                                 f"已完成目标S3次数: {total}")
+                    wx.CallAfter(
+                        self.window.add_log_message,
+                        f"已完成目标S3次数: {total}",
+                    )
                     return
         finally:
             if hand:
@@ -472,7 +647,8 @@ class Patvs_Fuction():
         # 启动 S3 和 USB 的监控线程
         s3_thread = threading.Thread(
             target=self.test_count_s3_sleep_events,
-            args=(start_time, s3_target_cycles, s3_done_event)
+            args=(start_time, s3_target_cycles),
+            kwargs={"s3_done_event": s3_done_event},
         )
         usb_thread = threading.Thread(
             target=self.monitor_device_plug_changes,
@@ -597,7 +773,28 @@ class Patvs_Fuction():
     #             except Exception as e:
     #                 logger.warning(f"S4 Final close error: {e}")
     #         self.action_complete.set()  # 设置动作完成状态
-    def test_count_s4_sleep_events(self, start_time, target_cycles):
+    def test_count_s4_sleep_events(self, start_time, target_cycles, remaining_cycles=None):
+        try:
+            target_cycles = float(target_cycles)
+        except (TypeError, ValueError):
+            target_cycles = 0.0
+        if remaining_cycles is None:
+            remaining_cycles = target_cycles
+        try:
+            remaining_cycles = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining_cycles = target_cycles
+        if target_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, "S4 目标次数为 0，自动跳过。")
+            self._record_count_progress(0, 0, action_key='s4')
+            self.action_complete.set()
+            return
+        completed_initial = max(0, int(target_cycles - remaining_cycles))
+        if remaining_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, f"S4 已完成目标次数 {int(target_cycles)}，自动跳过。")
+            self._record_count_progress(target_cycles, target_cycles, action_key='s4')
+            self.action_complete.set()
+            return
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -610,10 +807,14 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = 0
+        total = completed_initial
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
+            if total > 0:
+                wx.CallAfter(self.window.add_log_message,
+                             f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
+                self._record_count_progress(target_cycles, total, action_key='s4')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -646,14 +847,15 @@ class Patvs_Fuction():
                         occurred_time = event.TimeGenerated
                         if occurred_time > start_time:
                             total += 1
+                            self._record_count_progress(target_cycles, total, action_key='s4')
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试 {total} 次，目标次数为 {target_cycles} 次。")
+                                 f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
                     log_num = total
                 if total >= target_cycles:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"已完成目标S4次数: {target_cycles}")
+                                 f"已完成目标S4次数: {target_cycles:g}")
                     return
         finally:
             wx.CallAfter(self.window.add_log_message, "停止S4事件监控.")
@@ -664,7 +866,28 @@ class Patvs_Fuction():
                     logger.warning(f"S4 Final close error: {e}")
             self.action_complete.set()  # 设置动作完成状态
 
-    def test_count_s5_sleep_events(self, start_time, target_cycles):
+    def test_count_s5_sleep_events(self, start_time, target_cycles, remaining_cycles=None):
+        try:
+            target_cycles = float(target_cycles)
+        except (TypeError, ValueError):
+            target_cycles = 0.0
+        if remaining_cycles is None:
+            remaining_cycles = target_cycles
+        try:
+            remaining_cycles = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining_cycles = target_cycles
+        if target_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, "S5 目标次数为 0，自动跳过。")
+            self._record_count_progress(0, 0, action_key='s5')
+            self.action_complete.set()
+            return
+        completed_initial = max(0, int(target_cycles - remaining_cycles))
+        if remaining_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, f"S5 已完成目标次数 {int(target_cycles)}，自动跳过。")
+            self._record_count_progress(target_cycles, target_cycles, action_key='s5')
+            self.action_complete.set()
+            return
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -677,10 +900,14 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = 0
+        total = completed_initial
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
+            if total > 0:
+                wx.CallAfter(self.window.add_log_message,
+                             f"S5 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
+                self._record_count_progress(target_cycles, total, action_key='s5')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -713,14 +940,15 @@ class Patvs_Fuction():
                         occurred_time = event.TimeGenerated
                         if occurred_time > start_time:
                             total += 1
+                            self._record_count_progress(target_cycles, total, action_key='s5')
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试 {total} 次，目标次数为 {target_cycles} 次。")
+                                 f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
                     log_num = total
                 if total >= target_cycles:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"已完成目标S5次数: {target_cycles}")
+                                 f"已完成目标S5次数: {target_cycles:g}")
                     return
         finally:
             wx.CallAfter(self.window.add_log_message, "停止S5事件监控.")
@@ -731,7 +959,28 @@ class Patvs_Fuction():
                     logger.warning(f"S5 Final close error: {e}")
             self.action_complete.set()  # 设置动作完成状态
 
-    def test_count_restart_events(self, start_time, target_cycles):
+    def test_count_restart_events(self, start_time, target_cycles, remaining_cycles=None):
+        try:
+            target_cycles = float(target_cycles)
+        except (TypeError, ValueError):
+            target_cycles = 0.0
+        if remaining_cycles is None:
+            remaining_cycles = target_cycles
+        try:
+            remaining_cycles = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining_cycles = target_cycles
+        if target_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, "restart 目标次数为 0，自动跳过。")
+            self._record_count_progress(0, 0, action_key='restart')
+            self.action_complete.set()
+            return
+        completed_initial = max(0, int(target_cycles - remaining_cycles))
+        if remaining_cycles <= 0:
+            wx.CallAfter(self.window.add_log_message, f"restart 已完成目标次数 {int(target_cycles)}，自动跳过。")
+            self._record_count_progress(target_cycles, target_cycles, action_key='restart')
+            self.action_complete.set()
+            return
         def reopen_event_log():
             """尝试打开事件日志句柄，返回句柄或 None"""
             try:
@@ -744,10 +993,14 @@ class Patvs_Fuction():
         if hand is None:
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        total = 0
+        total = completed_initial
         log_num = 0
         start_time = self._normalize_start_time(start_time)
         try:
+            if total > 0:
+                wx.CallAfter(self.window.add_log_message,
+                             f"restart 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
+                self._record_count_progress(target_cycles, total, action_key='restart')
             while self.is_running:
                 if not hand:  # 检查句柄是否有效
                     hand = reopen_event_log()
@@ -780,14 +1033,15 @@ class Patvs_Fuction():
                         occurred_time = event.TimeGenerated
                         if occurred_time > start_time:
                             total += 1
+                            self._record_count_progress(target_cycles, total, action_key='restart')
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"当前已测试 {total} 次，目标次数为 {target_cycles} 次。")
+                                 f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
                     log_num = total
                 if total >= target_cycles:
                     wx.CallAfter(self.window.add_log_message,
-                                 f"已完成目标 restart 次数: {target_cycles}")
+                                 f"已完成目标 restart 次数: {target_cycles:g}")
                     return
         finally:
             wx.CallAfter(self.window.add_log_message, "停止 restart 事件监控.")
@@ -1070,16 +1324,25 @@ class Patvs_Fuction():
                 decrypted_data = self.decrypt_data(encrypted_data)
                 data = json.loads(decrypted_data)
                 if data.get('case_id') == self.case_id:
-                    return data.get('actions', []), data.get('start_time')
+                    normalized_actions = []
+                    for action in data.get('actions', []):
+                        normalized = self._normalize_stored_action(action)
+                        if normalized:
+                            normalized_actions.append(normalized)
+                    return normalized_actions, data.get('start_time')
         return [], None
 
     def save_session_state(self):
+        with self.state_lock:
+            actions_snapshot = [dict(action) for action in self.remaining_actions]
+            start_time = self.case_start_time
+            case_id = self.case_id
         logger.warning("开始保存临时文件")
-        logger.warning(self.remaining_actions)
+        logger.warning(actions_snapshot)
         data = json.dumps({
-            "case_id": self.case_id,
-            "actions": self.remaining_actions,
-            "start_time": self.case_start_time,
+            "case_id": case_id,
+            "actions": actions_snapshot,
+            "start_time": start_time,
         })
         encrypted_data = self.encrypt_data(data)
         with open(self.TEMP_FILE, 'wb') as file:
@@ -1097,7 +1360,13 @@ class Patvs_Fuction():
         try:
             self.case_id = case_id
             stored_actions, stored_start_time = self.load_session_state()
-            self.remaining_actions = stored_actions or action_and_num
+            if stored_actions:
+                self.remaining_actions = stored_actions
+            else:
+                self.remaining_actions = [
+                    self._build_action_state(action, amount)
+                    for action, amount in action_and_num
+                ]
 
             case_start_time = stored_start_time or start_time
             if isinstance(case_start_time, datetime.datetime):
@@ -1108,92 +1377,137 @@ class Patvs_Fuction():
 
             # 显示日志信息
             wx.CallAfter(self.window.add_log_message, f"请按照提示依次执行以下动作:")
-            for action, test_num in self.remaining_actions:
-                if action == '时间':
-                    wx.CallAfter(self.window.add_log_message, f"您选择的动作是: {action}，目标测试时间: {test_num} min")
+            with self.state_lock:
+                actions_snapshot = [dict(action) for action in self.remaining_actions]
+            for action_state in actions_snapshot:
+                action = action_state["name"]
+                target = action_state.get("target", 0)
+                remaining = action_state.get("remaining", target)
+                unit = action_state.get("unit", "count")
+                if unit == "seconds":
+                    target_minutes = target / 60 if target else 0
+                    remaining_minutes = remaining / 60 if remaining else 0
+                    if remaining < target:
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"您选择的动作是: {action}，剩余测试时间: {remaining_minutes:g} min / 总计 {target_minutes:g} min",
+                        )
+                    else:
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"您选择的动作是: {action}，目标测试时间: {target_minutes:g} min",
+                        )
                 else:
-                    wx.CallAfter(self.window.add_log_message, f"您选择的动作是: {action}，目标测试次数: {test_num}")
-            for action, test_num in self.remaining_actions:
+                    if remaining < target:
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"您选择的动作是: {action}，剩余测试次数: {remaining:g} / 总计 {target:g}",
+                        )
+                    else:
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"您选择的动作是: {action}，目标测试次数: {target:g}",
+                        )
+            while self.is_running:
+                with self.state_lock:
+                    if not self.remaining_actions:
+                        break
+                    current_action = dict(self.remaining_actions[0])
+                action = current_action["name"]
+                unit = current_action.get("unit", "count")
+                target_value = current_action.get("target", 0)
+                remaining_value = current_action.get("remaining", target_value)
                 if self.is_running:
                     display_action = action
-                    action = self.normalize_action(action)
-                    test_num = float(test_num)
+                    normalized_action = self.normalize_action(action)
                     # 在每个动作开始前更新临时文件
                     self.save_session_state()
                     # 清除上一个动作的完成状态
                     self.action_complete.clear()
-                    if '时间' in action:
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控时间，目标测试时间: {test_num} min")
-                        threading.Thread(target=self.monitor_time, args=(test_num,)).start()
-                    elif action == '电源插拔':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_power_plug_changes, args=(test_num,)).start()
-                    elif action.lower() == 'usb插拔':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        thread = threading.Thread(target=self.monitor_device_plug_changes, args=(test_num,))
+                    if '时间' in normalized_action or normalized_action == 'time':
+                        total_minutes = target_value / 60 if target_value else 0
+                        remaining_minutes = remaining_value / 60 if remaining_value else 0
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"开始执行监控时间，目标测试时间: {total_minutes:g} min，剩余 {remaining_minutes:g} min",
+                        )
+                        threading.Thread(
+                            target=self.monitor_time,
+                            args=(remaining_value, target_value),
+                        ).start()
+                    elif normalized_action == '电源插拔':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_power_plug_changes, args=(target_value,)).start()
+                    elif normalized_action.lower() == 'usb插拔':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        thread = threading.Thread(target=self.monitor_device_plug_changes, args=(target_value,))
                         thread.start()
                         # 获取线程ID
                         self.msg_loop_thread_id = thread.ident
-                    elif action == '键盘按键':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_keystrokes, args=(test_num,)).start()
-                    elif action == '锁屏':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        thread = threading.Thread(target=self.monitor_lock_screen_changes, args=(test_num,))
+                    elif normalized_action == '键盘按键':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_keystrokes, args=(target_value,)).start()
+                    elif normalized_action == '锁屏':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        thread = threading.Thread(target=self.monitor_lock_screen_changes, args=(target_value,))
                         thread.start()
                         # 获取线程ID
                         self.msg_loop_thread_id = thread.ident
-                    elif action == '鼠标点击':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_mouse_clicks, args=(test_num,)).start()
-                    elif action == 's3':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
+                    elif normalized_action == '鼠标点击':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_mouse_clicks, args=(target_value,)).start()
+                    elif normalized_action == 's3':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(target=self.test_count_s3_sleep_events,
-                                         args=(self.case_start_time, test_num,)).start()
-                    elif action == 's4':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
+                                         args=(self.case_start_time, target_value,),
+                                         kwargs={"remaining_cycles": remaining_value}).start()
+                    elif normalized_action == 's4':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(target=self.test_count_s4_sleep_events,
-                                         args=(self.case_start_time, test_num,)).start()
-                    elif action == 's5':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
+                                         args=(self.case_start_time, target_value,),
+                                         kwargs={"remaining_cycles": remaining_value}).start()
+                    elif normalized_action == 's5':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(target=self.test_count_s5_sleep_events,
-                                         args=(self.case_start_time, test_num,)).start()
-                    elif action == 'restart':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
+                                         args=(self.case_start_time, target_value,),
+                                         kwargs={"remaining_cycles": remaining_value}).start()
+                    elif normalized_action == 'restart':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(target=self.test_count_restart_events,
-                                         args=(self.case_start_time, test_num,)).start()
-                    elif action.lower() in self.KEY_MAPPING:
+                                         args=(self.case_start_time, target_value,),
+                                         kwargs={"remaining_cycles": remaining_value}).start()
+                    elif normalized_action.lower() in self.KEY_MAPPING:
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控按键: {action}，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_keystrokes2, args=(test_num, action,)).start()
-                    elif action == 's3插拔':
-                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {test_num}")
+                                     f"开始执行监控按键: {action}，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_keystrokes2, args=(target_value, action,)).start()
+                    elif normalized_action == 's3插拔':
+                        wx.CallAfter(self.window.add_log_message, f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(target=self.monitor_s3_and_usb,
-                                         args=(self.case_start_time, test_num, test_num)).start()
-                    elif action == 's3电源插拔':
+                                         args=(self.case_start_time, target_value, target_value)).start()
+                    elif normalized_action == 's3电源插拔':
                         threading.Thread(target=self.monitor_s3_and_power,
-                                         args=(self.case_start_time, test_num)).start()
-                    elif action == '显示器':
+                                         args=(self.case_start_time, target_value)).start()
+                    elif normalized_action == '显示器':
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控: {action} 开关事件，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_display_status, args=(test_num,)).start()
-                    elif action == '音量':
+                                     f"开始执行监控: {action} 开关事件，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_display_status, args=(target_value,)).start()
+                    elif normalized_action == '音量':
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控: {action} 加减事件，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_volume_changes, args=(test_num,)).start()
-                    elif action == '摄像头':
+                                     f"开始执行监控: {action} 加减事件，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_volume_changes, args=(target_value,)).start()
+                    elif normalized_action == '摄像头':
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控: {action} 开关事件，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_video_changes, args=(test_num,)).start()
-                    elif action.lower() == 'camera':
+                                     f"开始执行监控: {action} 开关事件，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_video_changes, args=(target_value,)).start()
+                    elif normalized_action.lower() == 'camera':
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控: {action} 开关事件，目标测试次数: {test_num}")
-                        threading.Thread(target=self.monitor_video_changes, args=(test_num,)).start()
-                    elif action in AUDIO_EVENT_KEYWORDS:
+                                     f"开始执行监控: {action} 开关事件，目标测试次数: {target_value:g}")
+                        threading.Thread(target=self.monitor_video_changes, args=(target_value,)).start()
+                    elif normalized_action in AUDIO_EVENT_KEYWORDS:
                         wx.CallAfter(self.window.add_log_message,
-                                     f"开始执行监控音频事件: {display_action}，目标测试次数: {int(test_num)}")
+                                     f"开始执行监控音频事件: {display_action}，目标测试次数: {int(target_value)}")
                         threading.Thread(target=self.monitor_audio_event,
-                                         args=(action, test_num, display_action)).start()
+                                         args=(normalized_action, target_value, display_action)).start()
                     else:
                         wx.CallAfter(self.window.add_log_message,
                                      f"未匹配到任何监控事项，请检查 {action} 填写是否正确")
@@ -1202,13 +1516,16 @@ class Patvs_Fuction():
                     self.action_complete.wait()
                     wx.CallAfter(self.window.add_log_message, f"动作 {action} 完成")
                     # 动作完成后，移除已执行的动作并保存
-                    self.remaining_actions = self.remaining_actions[1:]
-                    self.save_session_state()
+                    self._complete_current_action()
                 else:
                     logger.warning("事项block，退出执行")
-                    self.remaining_actions = []
+                    with self.state_lock:
+                        self.remaining_actions = []
+                    self.save_session_state()
             # 检查是否有剩余的动作
-            if not self.remaining_actions:
+            with self.state_lock:
+                has_remaining = bool(self.remaining_actions)
+            if not has_remaining:
                 logger.warning("所有动作执行完毕，开始删除临时文件")
                 self.remove_temp_file()
             logger.warning("所有动作执行完毕，解禁按钮")
