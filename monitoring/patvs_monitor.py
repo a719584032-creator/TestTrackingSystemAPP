@@ -262,10 +262,16 @@ class Patvs_Fuction():
         removed = False
         with self.state_lock:
             if self.remaining_actions:
-                self.remaining_actions = self.remaining_actions[1:]
-                removed = True
-        if removed:
-            self.save_session_state()
+                try:
+                    remaining = float(self.remaining_actions[0].get("remaining", 0))
+                except (TypeError, ValueError):
+                    remaining = 0.0
+                if remaining <= 0:
+                    self.remaining_actions = self.remaining_actions[1:]
+                    removed = True
+        # 无论是否移除，都更新一次临时文件以保存最新剩余进度
+        self.save_session_state()
+        return removed
 
     def _record_count_progress(self, target, completed, action_key=None):
         if action_key is not None:
@@ -484,6 +490,7 @@ class Patvs_Fuction():
             start_time, lambda event: event.EventID in (507, 107)
         )
         log_num = total
+        self._record_count_progress(target_cycles, total, action_key="s3")
         if total:
             wx.CallAfter(
                 self.window.add_log_message,
@@ -510,6 +517,7 @@ class Patvs_Fuction():
 
         hand = reopen_event_log()
         if hand is None:
+            self._record_count_progress(target_cycles, total, action_key="s3")
             return  # 如果无法打开句柄，退出
 
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
@@ -548,6 +556,7 @@ class Patvs_Fuction():
                             total += 1
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            self._record_count_progress(target_cycles, total, action_key="s3")
 
                 # 输出增量日志，如果total比上一次记录的last_total大，则说明有新日志
                 if total > log_num:
@@ -558,12 +567,14 @@ class Patvs_Fuction():
                     log_num = total
 
                 if total >= target_cycles:
+                    self._record_count_progress(target_cycles, total, action_key="s3")
                     wx.CallAfter(
                         self.window.add_log_message,
                         f"已完成目标S3次数: {total}",
                     )
                     return
         finally:
+            self._record_count_progress(target_cycles, total, action_key="s3")
             if hand:
                 try:
                     win32evtlog.CloseEventLog(hand)
@@ -818,6 +829,7 @@ class Patvs_Fuction():
             start_time, lambda event: event.EventID == 42
         )
         log_num = total
+        self._record_count_progress(target_cycles, total, action_key="s4")
         if total:
             wx.CallAfter(
                 self.window.add_log_message,
@@ -838,6 +850,7 @@ class Patvs_Fuction():
 
         hand = reopen_event_log()
         if hand is None:
+            self._record_count_progress(target_cycles, total, action_key="s4")
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         try:
@@ -874,16 +887,19 @@ class Patvs_Fuction():
                             total += 1
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            self._record_count_progress(target_cycles, total, action_key="s4")
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(self.window.add_log_message,
                                  f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。")
                     log_num = total
                 if total >= target_cycles:
+                    self._record_count_progress(target_cycles, total, action_key="s4")
                     wx.CallAfter(self.window.add_log_message,
                                  f"已完成目标S4次数: {target_cycles:g}")
                     return
         finally:
+            self._record_count_progress(target_cycles, total, action_key="s4")
             wx.CallAfter(self.window.add_log_message, "停止S4事件监控.")
             if hand:
                 try:
@@ -906,6 +922,7 @@ class Patvs_Fuction():
             start_time, lambda event: event.EventID == 7001
         )
         log_num = total
+        self._record_count_progress(target_cycles, total, action_key="s5")
         if total:
             wx.CallAfter(
                 self.window.add_log_message,
@@ -926,6 +943,7 @@ class Patvs_Fuction():
 
         hand = reopen_event_log()
         if hand is None:
+            self._record_count_progress(target_cycles, total, action_key="s5")
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         try:
@@ -962,6 +980,7 @@ class Patvs_Fuction():
                             total += 1
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            self._record_count_progress(target_cycles, total, action_key="s5")
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(
@@ -970,10 +989,12 @@ class Patvs_Fuction():
                     )
                     log_num = total
                 if total >= target_cycles:
+                    self._record_count_progress(target_cycles, total, action_key="s5")
                     wx.CallAfter(self.window.add_log_message,
                                  f"已完成目标S5次数: {target_cycles:g}")
                     return
         finally:
+            self._record_count_progress(target_cycles, total, action_key="s5")
             wx.CallAfter(self.window.add_log_message, "停止S5事件监控.")
             if hand:
                 try:
@@ -996,6 +1017,7 @@ class Patvs_Fuction():
             start_time, lambda event: (event.EventID & 0xFFFF) == 1074
         )
         log_num = total
+        self._record_count_progress(target_cycles, total, action_key="restart")
         if total:
             wx.CallAfter(
                 self.window.add_log_message,
@@ -1016,6 +1038,7 @@ class Patvs_Fuction():
 
         hand = reopen_event_log()
         if hand is None:
+            self._record_count_progress(target_cycles, total, action_key="restart")
             return  # 如果无法打开句柄，退出
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         try:
@@ -1052,6 +1075,7 @@ class Patvs_Fuction():
                             total += 1
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            self._record_count_progress(target_cycles, total, action_key="restart")
                 # 仅输出增量日志
                 if total > log_num:
                     wx.CallAfter(
@@ -1060,10 +1084,12 @@ class Patvs_Fuction():
                     )
                     log_num = total
                 if total >= target_cycles:
+                    self._record_count_progress(target_cycles, total, action_key="restart")
                     wx.CallAfter(self.window.add_log_message,
                                  f"已完成目标 restart 次数: {target_cycles:g}")
                     return
         finally:
+            self._record_count_progress(target_cycles, total, action_key="restart")
             wx.CallAfter(self.window.add_log_message, "停止 restart 事件监控.")
             if hand:
                 try:
@@ -1538,9 +1564,37 @@ class Patvs_Fuction():
                         self.action_complete.set()  # 设置动作完成状态
                     # 等待当前监控动作完成
                     self.action_complete.wait()
-                    wx.CallAfter(self.window.add_log_message, f"动作 {action} 完成")
+                    remaining_after = 0.0
+                    unit_after = unit
+                    with self.state_lock:
+                        snapshot = dict(self.remaining_actions[0]) if self.remaining_actions else None
+                    if snapshot and snapshot.get("name") == current_action.get("name"):
+                        unit_after = snapshot.get("unit", unit)
+                        try:
+                            remaining_after = float(snapshot.get("remaining", 0))
+                        except (TypeError, ValueError):
+                            remaining_after = 0.0
+                    if remaining_after <= 0:
+                        wx.CallAfter(self.window.add_log_message, f"动作 {action} 完成")
+                    else:
+                        if unit_after == "seconds":
+                            wx.CallAfter(
+                                self.window.add_log_message,
+                                f"动作 {action} 未完成，剩余测试时间: {remaining_after / 60:g} min ({remaining_after:g} 秒)",
+                            )
+                        else:
+                            wx.CallAfter(
+                                self.window.add_log_message,
+                                f"动作 {action} 未完成，剩余测试次数: {remaining_after:g}",
+                            )
                     # 动作完成后，移除已执行的动作并保存
-                    self._complete_current_action()
+                    completed = self._complete_current_action()
+                    if not completed:
+                        wx.CallAfter(
+                            self.window.add_log_message,
+                            f"动作 {action} 已暂停，本次监控将保留剩余进度以便下次继续。",
+                        )
+                        break
                 else:
                     logger.warning("事项block，退出执行")
                     self.save_session_state()
