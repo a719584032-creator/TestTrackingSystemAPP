@@ -1543,15 +1543,16 @@ class Patvs_Fuction():
                     self._complete_current_action()
                 else:
                     logger.warning("事项block，退出执行")
-                    with self.state_lock:
-                        self.remaining_actions = []
                     self.save_session_state()
+                    break
             # 检查是否有剩余的动作
             with self.state_lock:
                 has_remaining = bool(self.remaining_actions)
             if not has_remaining:
                 logger.warning("所有动作执行完毕，开始删除临时文件")
                 self.remove_temp_file()
+            else:
+                logger.warning("检测到未完成的动作，保留临时文件以便下次继续执行")
             logger.warning("所有动作执行完毕，解禁按钮")
             time.sleep(1)
             wx.CallAfter(self.window.after_test)
