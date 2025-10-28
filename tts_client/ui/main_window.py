@@ -308,26 +308,51 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.addWidget(filter_box)
 
         plan_box = QtWidgets.QGroupBox("计划总览")
-        plan_layout = QtWidgets.QGridLayout(plan_box)
-        plan_layout.setHorizontalSpacing(12)
-        plan_layout.setVerticalSpacing(8)
+        plan_layout = QtWidgets.QVBoxLayout(plan_box)
+        plan_layout.setSpacing(12)
+        plan_layout.setContentsMargins(16, 16, 16, 16)
 
-        plan_layout.addWidget(QtWidgets.QLabel("计划状态"), 0, 0)
+        header_row = QtWidgets.QHBoxLayout()
+        header_row.setSpacing(16)
+
+        info_layout = QtWidgets.QVBoxLayout()
+        info_layout.setSpacing(6)
+
+        self._plan_title_label = QtWidgets.QLabel("未选择计划")
+        self._plan_title_label.setStyleSheet("font-size: 20px; font-weight: 600; color: #111827;")
+        self._plan_title_label.setWordWrap(True)
+        info_layout.addWidget(self._plan_title_label)
+
+        meta_row = QtWidgets.QHBoxLayout()
+        meta_row.setSpacing(12)
+
+        self._plan_period_label = QtWidgets.QLabel("执行时间：—")
+        self._plan_period_label.setStyleSheet("color: #4B5563;")
+        self._plan_period_label.setWordWrap(True)
+        meta_row.addWidget(self._plan_period_label)
+
+        self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
+        self._plan_tester_label.setStyleSheet("color: #4B5563;")
+        self._plan_tester_label.setWordWrap(True)
+        meta_row.addWidget(self._plan_tester_label)
+        meta_row.addStretch()
+        info_layout.addLayout(meta_row)
+
+        header_row.addLayout(info_layout, stretch=1)
+
         self._plan_status_label = QtWidgets.QLabel("未选择")
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
-        self._plan_status_label.setFixedHeight(24)
+        self._plan_status_label.setFixedHeight(32)
+        self._plan_status_label.setMinimumWidth(128)
         self._apply_status_style(DEFAULT_STATUS_COLOR)
-        plan_layout.addWidget(self._plan_status_label, 0, 1)
+        header_row.addWidget(self._plan_status_label, 0, QtCore.Qt.AlignTop)
 
-        plan_layout.addWidget(QtWidgets.QLabel("时间周期"), 0, 2)
-        self._plan_period_label = QtWidgets.QLabel("—")
-        self._plan_period_label.setWordWrap(True)
-        plan_layout.addWidget(self._plan_period_label, 0, 3)
+        plan_layout.addLayout(header_row)
 
-        plan_layout.addWidget(QtWidgets.QLabel("测试人员"), 1, 0)
-        self._plan_tester_label = QtWidgets.QLabel("—")
-        self._plan_tester_label.setWordWrap(True)
-        plan_layout.addWidget(self._plan_tester_label, 1, 1, 1, 3)
+        divider = QtWidgets.QFrame()
+        divider.setFrameShape(QtWidgets.QFrame.HLine)
+        divider.setFrameShadow(QtWidgets.QFrame.Sunken)
+        plan_layout.addWidget(divider)
 
         stats_row = QtWidgets.QHBoxLayout()
         stats_row.setSpacing(10)
@@ -344,22 +369,23 @@ class MainWindow(QtWidgets.QMainWindow):
             pill = QtWidgets.QLabel(f"{title}\n0")
             pill.setAlignment(QtCore.Qt.AlignCenter)
             pill.setWordWrap(True)
-            pill.setMinimumWidth(82)
+            pill.setMinimumWidth(90)
             pill.setStyleSheet(
                 f"""
                 QLabel {{
                     background-color: {bg};
                     color: {fg};
                     border-radius: 12px;
-                    padding: 6px 10px;
+                    padding: 8px 12px;
                     font-weight: 600;
+                    font-size: 13px;
                 }}
                 """
             )
             stats_row.addWidget(pill)
             self._plan_stat_labels[key] = (pill, title)
         stats_row.addStretch()
-        plan_layout.addLayout(stats_row, 2, 0, 1, 4)
+        plan_layout.addLayout(stats_row)
 
         root_layout.addWidget(plan_box)
 
@@ -377,6 +403,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self._case_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._case_tree.setIndentation(18)
         self._case_tree.setUniformRowHeights(True)
+        self._case_tree.setAlternatingRowColors(True)
+        self._case_tree.setAnimated(True)
+        self._case_tree.header().setDefaultAlignment(
+            QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter
+        )
+        self._case_tree.setStyleSheet(
+            """
+            QTreeWidget {
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                background-color: #FFFFFF;
+            }
+            QTreeWidget::item {
+                padding: 6px 8px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #DBEAFE;
+                color: #1E3A8A;
+            }
+            QTreeWidget::item:hover {
+                background-color: #F3F4F6;
+            }
+            """
+        )
         left_layout.addWidget(self._case_tree, stretch=1)
 
         splitter.addWidget(left_widget)
@@ -511,9 +561,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 background-color: {color}22;
                 color: {color};
                 border: 1px solid {color};
-                border-radius: 12px;
-                padding: 0 10px;
+                border-radius: 16px;
+                padding: 6px 16px;
                 font-weight: 600;
+                letter-spacing: 1px;
+                font-size: 13px;
             }}
             """
         )
@@ -1219,8 +1271,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not detail:
             self._plan_status_label.setText("未选择")
             self._apply_status_style(DEFAULT_STATUS_COLOR)
-            self._plan_period_label.setText("—")
-            self._plan_tester_label.setText("—")
+            self._plan_title_label.setText("未选择计划")
+            self._plan_period_label.setText("执行时间：—")
+            self._plan_tester_label.setText("执行人员：—")
             for key, (label, title) in self._plan_stat_labels.items():
                 label.setText(f"{title}\n0")
             return
@@ -1238,8 +1291,9 @@ class MainWindow(QtWidgets.QMainWindow):
         status_text = detail.status or "未开始"
         self._plan_status_label.setText(status_text)
         self._apply_status_style(STATUS_COLORS.get(status_text, DEFAULT_STATUS_COLOR))
-        self._plan_period_label.setText(period)
-        self._plan_tester_label.setText(testers)
+        self._plan_title_label.setText(detail.name or "未命名计划")
+        self._plan_period_label.setText(f"执行时间：{period}")
+        self._plan_tester_label.setText(f"执行人员：{testers}")
 
         stats_values = {
             "total": 0,
@@ -1288,12 +1342,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 if key not in parents:
                     node = QtWidgets.QTreeWidgetItem([token])
                     node.setFlags(QtCore.Qt.ItemIsEnabled)
+                    node.setFirstColumnSpanned(True)
+                    node_font = node.font(0)
+                    node_font.setBold(True)
+                    node.setFont(0, node_font)
+                    node.setForeground(0, QtGui.QBrush(QtGui.QColor("#1F2937")))
+                    node.setBackground(0, QtGui.QBrush(QtGui.QColor("#F3F4F6")))
+                    node.setSizeHint(0, QtCore.QSize(0, 30))
                     parent.addChild(node)
                     parents[key] = node
                 parent = parents[key]
             display_text = self._case_display_text(entry)
             item = QtWidgets.QTreeWidgetItem([display_text])
             item.setData(0, QtCore.Qt.UserRole, entry)
+            item.setSizeHint(0, QtCore.QSize(0, 28))
             result_color = self._status_color(entry)
             if result_color:
                 item.setForeground(0, QtGui.QBrush(QtGui.QColor(result_color)))
