@@ -227,6 +227,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._awaiting_monitor_completion_for_pass = False
         self._pending_filter_state: Optional[Dict[str, object]] = None
         self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
+        self._auto_start_in_progress = False
 
         self._state_file_path = self._resolve_state_path()
         self._restore_department_id: Optional[int] = None
@@ -1604,6 +1605,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
         if self._restore_start_clicked:
             self._restore_start_clicked = False
+            self._auto_start_in_progress = True
             QtCore.QTimer.singleShot(0, self._start_monitoring)
 
     def _update_case_detail(self, entry: Optional[CaseDisplayEntry]) -> None:
@@ -1684,34 +1686,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
-        if not self._current_case:
-            QtWidgets.QMessageBox.information(self, "未选择", "请先选择用例")
-            return
-        if not self._current_actions:
-            QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
-            return
-        if self._current_entry:
-            result_text = self._existing_result_label(self._current_entry)
-            if result_text:
-                confirm = QtWidgets.QMessageBox.question(
-                    self,
-                    "确认执行",
-                    f"当前用例已有执行结果（{result_text}），是否再次执行？",
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No,
-                )
-                if confirm != QtWidgets.QMessageBox.Yes:
-                    return
-        self._awaiting_monitor_completion_for_pass = any(
-            "时间" in action.name for action in self._current_actions
-        )
-        start_time = dt.datetime.now().isoformat()
-        self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
-        self._append_log("监控已启动")
-        self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
-        self._set_action_buttons_mode(True)
-        self._set_execution_lock(True)
-        self.save_state()
+        try:
+            if not self._current_case:
+                QtWidgets.QMessageBox.information(self, "未选择", "请先选择用例")
+                return
+            if not self._current_actions:
+                QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
+                return
+            if self._current_entry:
+                result_text = self._existing_result_label(self._current_entry)
+                if result_text and not self._auto_start_in_progress:
+                    confirm = QtWidgets.QMessageBox.question(
+                        self,
+                        "确认执行",
+                        f"当前用例已有执行结果（{result_text}），是否再次执行？",
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                        QtWidgets.QMessageBox.No,
+                    )
+                    if confirm != QtWidgets.QMessageBox.Yes:
+                        return
+            self._awaiting_monitor_completion_for_pass = any(
+                "时间" in action.name for action in self._current_actions
+            )
+            start_time = dt.datetime.now().isoformat()
+            self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
+            self._append_log("监控已启动")
+            self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
+            self._set_action_buttons_mode(True)
+            self._set_execution_lock(True)
+            self.save_state()
+        finally:
+            self._auto_start_in_progress = False
 
     def _existing_result_label(self, entry: CaseDisplayEntry) -> Optional[str]:
         result: Optional[str] = None
