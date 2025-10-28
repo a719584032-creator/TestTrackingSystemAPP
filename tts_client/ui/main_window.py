@@ -336,6 +336,7 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout.setSpacing(4)
 
         plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
+        plan_body_style = "font-size: 18px; color: #111827;"
 
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
         self._plan_title_label.setStyleSheet(plan_header_style)
@@ -343,12 +344,12 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout.addWidget(self._plan_title_label)
 
         self._plan_period_label = QtWidgets.QLabel("执行时间：—")
-        self._plan_period_label.setStyleSheet(plan_header_style)
+        self._plan_period_label.setStyleSheet(plan_body_style)
         self._plan_period_label.setWordWrap(True)
         info_layout.addWidget(self._plan_period_label)
 
         self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
-        self._plan_tester_label.setStyleSheet(plan_header_style)
+        self._plan_tester_label.setStyleSheet(plan_body_style)
         self._plan_tester_label.setWordWrap(True)
         info_layout.addWidget(self._plan_tester_label)
 
