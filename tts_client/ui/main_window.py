@@ -335,20 +335,20 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout = QtWidgets.QVBoxLayout()
         info_layout.setSpacing(4)
 
+        plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
+
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
-        self._plan_title_label.setStyleSheet(
-            "font-size: 18px; font-weight: 600; color: #111827;"
-        )
+        self._plan_title_label.setStyleSheet(plan_header_style)
         self._plan_title_label.setWordWrap(True)
         info_layout.addWidget(self._plan_title_label)
 
         self._plan_period_label = QtWidgets.QLabel("执行时间：—")
-        self._plan_period_label.setStyleSheet("color: #4B5563; font-size: 13px;")
+        self._plan_period_label.setStyleSheet(plan_header_style)
         self._plan_period_label.setWordWrap(True)
         info_layout.addWidget(self._plan_period_label)
 
         self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
-        self._plan_tester_label.setStyleSheet("color: #4B5563; font-size: 13px;")
+        self._plan_tester_label.setStyleSheet(plan_header_style)
         self._plan_tester_label.setWordWrap(True)
         info_layout.addWidget(self._plan_tester_label)
 
@@ -356,7 +356,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._plan_status_label = QtWidgets.QLabel("未选择")
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
-        self._plan_status_label.setFixedHeight(28)
+        self._plan_status_label.setFixedHeight(36)
         self._plan_status_label.setMinimumWidth(96)
         self._plan_status_label.setSizePolicy(
             QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed
@@ -613,7 +613,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 14px;
                 padding: 4px 12px;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 18px;
             }}
             """
         )
