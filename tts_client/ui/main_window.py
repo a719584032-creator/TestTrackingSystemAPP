@@ -308,54 +308,74 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.addWidget(filter_box)
 
         plan_box = QtWidgets.QGroupBox("计划总览")
+        plan_box.setStyleSheet(
+            """
+            QGroupBox {
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
+                margin-top: 12px;
+                font-weight: 600;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 16px;
+                padding: 0 6px;
+                color: #1F2937;
+                font-size: 15px;
+            }
+            """
+        )
         plan_layout = QtWidgets.QVBoxLayout(plan_box)
-        plan_layout.setSpacing(12)
-        plan_layout.setContentsMargins(16, 16, 16, 16)
+        plan_layout.setSpacing(14)
+        plan_layout.setContentsMargins(20, 24, 20, 20)
 
         header_row = QtWidgets.QHBoxLayout()
-        header_row.setSpacing(16)
+        header_row.setSpacing(12)
 
         info_layout = QtWidgets.QVBoxLayout()
-        info_layout.setSpacing(6)
+        info_layout.setSpacing(4)
+
+        plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
+        plan_body_style = "font-size: 18px; color: #111827;"
 
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
-        self._plan_title_label.setStyleSheet("font-size: 20px; font-weight: 600; color: #111827;")
+        self._plan_title_label.setStyleSheet(plan_header_style)
         self._plan_title_label.setWordWrap(True)
         info_layout.addWidget(self._plan_title_label)
 
-        meta_row = QtWidgets.QHBoxLayout()
-        meta_row.setSpacing(12)
-
         self._plan_period_label = QtWidgets.QLabel("执行时间：—")
-        self._plan_period_label.setStyleSheet("color: #4B5563;")
+        self._plan_period_label.setStyleSheet(plan_body_style)
         self._plan_period_label.setWordWrap(True)
-        meta_row.addWidget(self._plan_period_label)
+        info_layout.addWidget(self._plan_period_label)
 
         self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
-        self._plan_tester_label.setStyleSheet("color: #4B5563;")
+        self._plan_tester_label.setStyleSheet(plan_body_style)
         self._plan_tester_label.setWordWrap(True)
-        meta_row.addWidget(self._plan_tester_label)
-        meta_row.addStretch()
-        info_layout.addLayout(meta_row)
+        info_layout.addWidget(self._plan_tester_label)
 
         header_row.addLayout(info_layout, stretch=1)
 
         self._plan_status_label = QtWidgets.QLabel("未选择")
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
-        self._plan_status_label.setFixedHeight(32)
-        self._plan_status_label.setMinimumWidth(128)
+        self._plan_status_label.setFixedHeight(36)
+        self._plan_status_label.setMinimumWidth(96)
+        self._plan_status_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed
+        )
         self._apply_status_style(DEFAULT_STATUS_COLOR)
-        header_row.addWidget(self._plan_status_label, 0, QtCore.Qt.AlignTop)
+        header_row.addWidget(
+            self._plan_status_label, 0, QtCore.Qt.AlignRight | QtCore.Qt.AlignTop
+        )
 
         plan_layout.addLayout(header_row)
 
-        divider = QtWidgets.QFrame()
-        divider.setFrameShape(QtWidgets.QFrame.HLine)
-        divider.setFrameShadow(QtWidgets.QFrame.Sunken)
-        plan_layout.addWidget(divider)
-
-        stats_row = QtWidgets.QHBoxLayout()
-        stats_row.setSpacing(10)
+        stats_box = QtWidgets.QWidget()
+        stats_box.setStyleSheet(
+            "background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;"
+        )
+        stats_layout = QtWidgets.QHBoxLayout(stats_box)
+        stats_layout.setContentsMargins(12, 10, 12, 10)
+        stats_layout.setSpacing(8)
         self._plan_stat_labels: Dict[str, Tuple[QtWidgets.QLabel, str]] = {}
         stat_configs = [
             ("total", "总数", "#EEF2FF", "#1E3A8A"),
@@ -366,26 +386,24 @@ class MainWindow(QtWidgets.QMainWindow):
             ("notrun", "未执行", "#E5E7EB", "#374151"),
         ]
         for key, title, bg, fg in stat_configs:
-            pill = QtWidgets.QLabel(f"{title}\n0")
+            pill = QtWidgets.QLabel(f"{title} 0")
             pill.setAlignment(QtCore.Qt.AlignCenter)
-            pill.setWordWrap(True)
-            pill.setMinimumWidth(90)
             pill.setStyleSheet(
                 f"""
                 QLabel {{
                     background-color: {bg};
                     color: {fg};
-                    border-radius: 12px;
-                    padding: 8px 12px;
+                    border-radius: 10px;
+                    padding: 6px 12px;
                     font-weight: 600;
                     font-size: 13px;
                 }}
                 """
             )
-            stats_row.addWidget(pill)
+            stats_layout.addWidget(pill)
             self._plan_stat_labels[key] = (pill, title)
-        stats_row.addStretch()
-        plan_layout.addLayout(stats_row)
+        stats_layout.addStretch()
+        plan_layout.addWidget(stats_box)
 
         root_layout.addWidget(plan_box)
 
@@ -414,6 +432,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border: 1px solid #E5E7EB;
                 border-radius: 8px;
                 background-color: #FFFFFF;
+                alternate-background-color: #F9FAFB;
             }
             QTreeWidget::item {
                 padding: 6px 8px;
@@ -424,6 +443,37 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             QTreeWidget::item:hover {
                 background-color: #F3F4F6;
+            }
+            QTreeView::branch {
+                background: transparent;
+            }
+            QTreeView::branch:has-siblings:!adjoins-item {
+                border-image: none;
+                image: none;
+                border-left: 1px dashed #CBD5E1;
+            }
+            QTreeView::branch:has-siblings:adjoins-item {
+                border-image: none;
+                image: none;
+                border-left: 1px dashed #CBD5E1;
+                border-top: 1px dashed #CBD5E1;
+            }
+            QTreeView::branch:!has-children:!has-siblings:adjoins-item {
+                border-image: none;
+                image: none;
+                border-left: 1px dashed #CBD5E1;
+                border-top: 1px dashed #CBD5E1;
+            }
+            QTreeView::branch:has-children:!has-siblings:adjoins-item {
+                border-image: none;
+                image: none;
+                border-left: 1px dashed #CBD5E1;
+                border-top: 1px dashed #CBD5E1;
+            }
+            QTreeView::branch:has-children:has-siblings {
+                border-image: none;
+                image: none;
+                border-left: 1px dashed #CBD5E1;
             }
             """
         )
@@ -558,14 +608,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_status_label.setStyleSheet(
             f"""
             QLabel {{
-                background-color: {color}22;
-                color: {color};
-                border: 1px solid {color};
-                border-radius: 16px;
-                padding: 6px 16px;
+                background-color: {color};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 14px;
+                padding: 4px 12px;
                 font-weight: 600;
-                letter-spacing: 1px;
-                font-size: 13px;
+                font-size: 18px;
             }}
             """
         )
@@ -1275,7 +1324,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._plan_period_label.setText("执行时间：—")
             self._plan_tester_label.setText("执行人员：—")
             for key, (label, title) in self._plan_stat_labels.items():
-                label.setText(f"{title}\n0")
+                label.setText(f"{title} 0")
             return
 
         if detail.start_date and detail.end_date:
@@ -1317,7 +1366,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
         for key, (label, title) in self._plan_stat_labels.items():
-            label.setText(f"{title}\n{stats_values.get(key, 0)}")
+            label.setText(f"{title} {stats_values.get(key, 0)}")
 
     def _refresh_case_tree(self) -> None:
         self._case_tree.blockSignals(True)
