@@ -13,11 +13,21 @@ dependencies = [
     "PyQt5",
     "requests",
     "cryptography",
+    "psutil",
+    "pynput",
+    "pycaw",
+    "comtypes",
+    "screen-brightness-control",
+    "opencv-python",
+    "pywin32",
 ]
 
 [project.scripts]
-tts-client = "TestTrackingSystemAPP.tts_client.app:main"
+tts-client = "tts_client.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["TestTrackingSystemAPP*"]
+include = ["tts_client*", "monitoring*"]
+
+[tool.setuptools]
+py-modules = ["main", "build", "resources"]
