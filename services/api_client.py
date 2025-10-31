@@ -8,9 +8,9 @@ from typing import Dict, Iterable, List, Optional
 
 import requests
 
-from .config import SETTINGS
-from .exceptions import AuthenticationError, ClientError, NetworkError
-from .models import Department, PlanCase, PlanDetail, Project, TestPlan
+from config.settings import SETTINGS
+from models import Department, PlanCase, PlanDetail, Project, TestPlan
+from utils.exceptions import AuthenticationError, ClientError, NetworkError
 
 logger = logging.getLogger(__name__)
 

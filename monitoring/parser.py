@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 
-from .exceptions import ValidationError
+from utils.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

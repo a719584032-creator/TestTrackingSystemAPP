@@ -1,4 +1,4 @@
-"""OTA update helpers."""
+"""OTA update helpers for the desktop client."""
 from __future__ import annotations
 
 import logging
@@ -7,8 +7,8 @@ from typing import Optional
 
 import requests
 
-from .config import SETTINGS
-from .exceptions import NetworkError
+from config.settings import SETTINGS
+from utils.exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
 

@@ -23,11 +23,19 @@ dependencies = [
 ]
 
 [project.scripts]
-tts-client = "tts_client.app:main"
+tts-client = "main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tts_client*", "monitoring*"]
+include = [
+    "config*",
+    "services*",
+    "models*",
+    "monitoring*",
+    "ui*",
+    "utils*",
+    "widgets*",
+]
 
 [tool.setuptools]
-py-modules = ["main", "build", "resources"]
+py-modules = ["main", "run", "build"]

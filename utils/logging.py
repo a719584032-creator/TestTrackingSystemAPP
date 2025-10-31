@@ -7,7 +7,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from .config import SETTINGS
+from config.settings import SETTINGS
 
 
 def configure_logging() -> Path:
