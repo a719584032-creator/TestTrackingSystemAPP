@@ -89,10 +89,11 @@ TestTrackingSystemAPP/
 ## 打包与分发
 ### 使用 `build.py`
 1. 确认已安装 PyInstaller (`pip install pyinstaller`)。
-2. 执行：
+2. 在项目根目录执行：
    ```bash
-   python -m TestTrackingSystemAPP.build
+   python build.py
    ```
+   > 说明：`build.py` 位于仓库根目录。如果希望通过 `python -m TestTrackingSystemAPP.build` 调用，需要在其上一级目录执行，否则 Python 无法定位 `TestTrackingSystemAPP` 包而报 `ModuleNotFoundError`。
 3. 首次执行会自动生成 `patvs_client.spec`，随后在 `dist/` 下输出可执行包。 【F:build.py†L1-L52】
 
 ### 使用 `scripts/build_exe.py`
