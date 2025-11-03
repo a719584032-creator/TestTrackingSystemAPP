@@ -10,15 +10,42 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
-def run(context: "Patvs_Fuction", target_cycles: float) -> None:
-    """检测显示器亮度变化，统计关闭周期。"""
+def run(
+    context: "Patvs_Fuction",
+    target_cycles: float,
+    remaining_cycles: float | None = None,
+) -> None:
+    """检测显示器亮度变化，统计关闭周期，支持断点续跑。"""
+
+    try:
+        total_target = float(target_cycles)
+    except (TypeError, ValueError):
+        total_target = 0.0
+    if total_target <= 0:
+        context.log("显示器开关目标次数为 0，自动跳过。")
+        context.action_complete.set()
+        return
+
+    if remaining_cycles is None:
+        remaining = total_target
+    else:
+        try:
+            remaining = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining = total_target
+    remaining = max(0.0, min(total_target, remaining))
 
     previous_brightness = None
-    off_cycle_count = 0
+    off_cycle_count = max(0.0, total_target - remaining)
     was_display_on = True
     expected_keys = {"显示器"}
 
-    while context.is_running and off_cycle_count < target_cycles:
+    if off_cycle_count > 0:
+        context.log(
+            f"显示器开关已累计完成 {off_cycle_count:g} 次，剩余 {max(0.0, total_target - off_cycle_count):g} 次。"
+        )
+
+    while context.is_running and off_cycle_count < total_target:
         try:
             current_brightness = sbc.get_brightness(display=0)
             context.log(f"当前显示器亮度: {current_brightness}")
@@ -35,7 +62,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
                 off_cycle_count += 1
                 context.log(f"显示器关闭周期完成: {off_cycle_count} 次")
                 context.record_count_progress_if_current(
-                    target_cycles, off_cycle_count, expected_keys=expected_keys
+                    total_target, off_cycle_count, expected_keys=expected_keys
                 )
             was_display_on = False
             previous_brightness = None
@@ -44,10 +71,10 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
 
     if context.is_running:
         context.record_count_progress_if_current(
-            target_cycles, off_cycle_count, expected_keys=expected_keys
+            total_target, off_cycle_count, expected_keys=expected_keys
         )
         context.log(
-            f"显示器开关次数已达到目标次数 ({target_cycles:g})，总计完成 {off_cycle_count} 次，退出监控。"
+            f"显示器开关次数已达到目标次数 ({total_target:g})，总计完成 {off_cycle_count} 次，退出监控。"
         )
     else:
         context.log("退出显示器开关监控。")

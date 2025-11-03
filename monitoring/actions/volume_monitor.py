@@ -26,8 +26,31 @@ def _get_volume() -> float:
     return volume.GetMasterVolumeLevelScalar()
 
 
-def run(context: "Patvs_Fuction", target_change_count: float) -> None:
-    """监控系统音量变化次数。"""
+def run(
+    context: "Patvs_Fuction",
+    target_change_count: float,
+    remaining_change_count: float | None = None,
+) -> None:
+    """监控系统音量变化次数，支持断点续跑。"""
+
+    try:
+        total_target = float(target_change_count)
+    except (TypeError, ValueError):
+        total_target = 0.0
+    if total_target <= 0:
+        context.log("音量目标次数为 0，自动跳过。")
+        context.action_complete.set()
+        return
+
+    if remaining_change_count is None:
+        remaining = total_target
+    else:
+        try:
+            remaining = float(remaining_change_count)
+        except (TypeError, ValueError):
+            remaining = total_target
+    remaining = max(0.0, min(total_target, remaining))
+    change_count = max(0.0, total_target - remaining)
 
     coinited = False
     if pythoncom is not None:
@@ -39,11 +62,15 @@ def run(context: "Patvs_Fuction", target_change_count: float) -> None:
 
     try:
         previous_volume = _get_volume()
-        change_count = 0
         context.log(f"初始系统音量: {previous_volume * 100:.2f}%")
+        if change_count > 0:
+            remaining_to_go = max(0.0, total_target - change_count)
+            context.log(
+                f"音量变化已累计 {change_count:g} 次，剩余 {remaining_to_go:g} 次。"
+            )
         expected_keys = {"音量"}
 
-        while context.is_running and change_count < target_change_count:
+        while context.is_running and change_count < total_target:
             time.sleep(1)
             current_volume = _get_volume()
             if current_volume != previous_volume:
@@ -53,15 +80,15 @@ def run(context: "Patvs_Fuction", target_change_count: float) -> None:
                 )
                 previous_volume = current_volume
                 context.record_count_progress_if_current(
-                    target_change_count, change_count, expected_keys=expected_keys
+                    total_target, change_count, expected_keys=expected_keys
                 )
 
         if context.is_running:
             context.record_count_progress_if_current(
-                target_change_count, change_count, expected_keys=expected_keys
+                total_target, change_count, expected_keys=expected_keys
             )
             context.log(
-                f"音量变化次数已达到目标次数 ({target_change_count:g})，总计完成 {change_count} 次，退出监控。"
+                f"音量变化次数已达到目标次数 ({total_target:g})，总计完成 {change_count} 次，退出监控。"
             )
         else:
             context.log("退出音量加减事件监控。")

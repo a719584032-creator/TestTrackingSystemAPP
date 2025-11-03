@@ -38,13 +38,16 @@ class WTSSESSION_NOTIFICATION(ctypes.Structure):
 
 
 class SessionNotificationHandler:
-    def __init__(self, context: "Patvs_Fuction", target_cycles):
+    def __init__(self, context: "Patvs_Fuction", target_cycles, initial_count=0):
         self.hwnd = None
         self.context = context
         self.window = context.window
         self.className = f"suopin_WindowClass_{uuid.uuid4()}"
         self.target_cycles = target_cycles
-        self.lock_count = 0
+        try:
+            self.lock_count = int(float(initial_count))
+        except (TypeError, ValueError):
+            self.lock_count = 0
         wc = win32gui.WNDCLASS()
         wc.lpfnWndProc = self.wnd_proc
         wc.lpszClassName = self.className
@@ -64,7 +67,7 @@ class SessionNotificationHandler:
                 self.context.record_count_progress_if_current(
                     self.target_cycles, self.lock_count, expected_keys={"锁屏"}
                 )
-                if self.lock_count >= self.target_cycles:
+                if self.target_cycles and self.lock_count >= self.target_cycles:
                     self.context.record_count_progress_if_current(
                         self.target_cycles,
                         self.lock_count,
@@ -94,6 +97,30 @@ class SessionNotificationHandler:
             logger.error(f"未知错误 {e}")
 
 
-def monitor_locks(context: "Patvs_Fuction", target_cycles):
-    handler = SessionNotificationHandler(context, target_cycles)
+def monitor_locks(context: "Patvs_Fuction", target_cycles, remaining_cycles=None):
+    try:
+        total_target = float(target_cycles)
+    except (TypeError, ValueError):
+        total_target = 0.0
+    if total_target <= 0:
+        context.log("锁屏目标次数为 0，自动跳过。")
+        context.record_count_progress_if_current(0, 0, expected_keys={"锁屏"})
+        return
+
+    if remaining_cycles is None:
+        remaining = total_target
+    else:
+        try:
+            remaining = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining = total_target
+    remaining = max(0.0, min(total_target, remaining))
+    completed = max(0.0, total_target - remaining)
+
+    if completed > 0:
+        context.log(
+            f"锁屏已累计 {completed:g} 次，剩余 {max(0.0, total_target - completed):g} 次。"
+        )
+
+    handler = SessionNotificationHandler(context, total_target, initial_count=completed)
     handler.run()
