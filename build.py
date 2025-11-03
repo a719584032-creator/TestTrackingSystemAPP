@@ -1,69 +1,98 @@
 """Helper utilities for packaging the client with PyInstaller."""
 from __future__ import annotations
 
+import os
+import pkgutil
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 BUILD_DIR = ROOT / "build"
-BUILD_DIR.mkdir(parents=True, exist_ok=True)
+DIST_DIR = ROOT / "dist"
+
+
+def _collect_hidden_imports(packages: list[str]) -> list[str]:
+    """Return a list of all modules that should be force-imported.
+
+    PyInstaller struggles to discover dynamically imported modules inside our
+    package namespaces (``ui``, ``services`` …).  Walking the package tree and
+    feeding the discovered modules as ``--hidden-import`` arguments guarantees
+    they are bundled inside the executable.
+    """
+
+    hidden: set[str] = set()
+    for package in packages:
+        hidden.add(package)
+        package_path = ROOT / package
+        if not package_path.exists():
+            continue
+        for module in pkgutil.walk_packages([str(package_path)], f"{package}."):
+            hidden.add(module.name)
+    return sorted(hidden)
+
+
+def _collect_data_directories(directories: list[str]) -> list[tuple[str, str]]:
+    """Return ``(source, destination)`` tuples for data directories."""
+
+    data_entries: list[tuple[str, str]] = []
+    for directory in directories:
+        path = ROOT / directory
+        if path.is_dir():
+            data_entries.append((str(path), directory))
+    return data_entries
 
 
 def build_executable(output_dir: str = "dist") -> None:
-    spec_file = BUILD_DIR / "tts_client.spec"
-    if not spec_file.exists():
-        spec_file.write_text(
-            """
-# -*- mode: python -*-
-block_cipher = None
+    """Build the standalone executable using the current project layout."""
 
-a = Analysis(['../main.py'],
-             pathex=['..'],
-             binaries=[],
-             datas=[],
-             hiddenimports=[],
-             hookspath=[],
-             hooksconfig={},
-             runtime_hooks=[],
-             excludes=[],
-             win_no_prefer_redirects=False,
-             win_private_assemblies=False,
-             cipher=block_cipher,
-             noarchive=False)
-pyz = PYZ(a.pure, a.zipped_data,
-             cipher=block_cipher)
-exe = EXE(pyz,
-          a.scripts,
-          [],
-          exclude_binaries=True,
-          name='patvs-client',
-          debug=False,
-          bootloader_ignore_signals=False,
-          strip=False,
-          upx=True,
-          upx_exclude=[],
-          runtime_tmpdir=None,
-          console=False,
-          disable_windowed_traceback=False,
-          argv_emulation=False,
-          target_arch=None,
-          codesign_identity=None,
-          entitlements_file=None )
-coll = COLLECT(exe,
-               a.binaries,
-               a.zipfiles,
-               a.datas,
-               strip=False,
-               upx=True,
-               upx_exclude=[],
-               name='patvs-client')
-""",
-            encoding="utf-8",
-        )
-    subprocess.run(
-        ["pyinstaller", "--noconfirm", "--clean", "--distpath", output_dir, str(spec_file)],
-        check=True,
-    )
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+
+    packages = [
+        "config",
+        "monitoring",
+        "models",
+        "services",
+        "ui",
+        "utils",
+        "widgets",
+    ]
+    data_dirs = ["resources", "data", "config"]
+
+    hidden_imports = _collect_hidden_imports(packages)
+    data_entries = _collect_data_directories(data_dirs)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--name",
+        "patvs-client",
+        "--distpath",
+        str(ROOT / output_dir),
+        "--workpath",
+        str(BUILD_DIR / "work"),
+        "--specpath",
+        str(BUILD_DIR),
+        "--paths",
+        str(ROOT),
+    ]
+
+    for source, destination in data_entries:
+        cmd.extend([
+            "--add-data",
+            f"{source}{os.pathsep}{destination}",
+        ])
+
+    for module_name in hidden_imports:
+        cmd.extend(["--hidden-import", module_name])
+
+    cmd.append(str(ROOT / "main.py"))
+
+    subprocess.run(cmd, check=True)
 
 
 if __name__ == "__main__":
