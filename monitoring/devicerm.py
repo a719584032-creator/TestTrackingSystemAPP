@@ -29,8 +29,14 @@ GUID_DEVINTERFACE_USB_DEVICE = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 class Notification:
     def __init__(self, context, cycles_count, target_cycles):
         self.context = context
-        self.cycles_count = cycles_count   # 初始化插拔次数
-        self.target_cycles = target_cycles  # 目标的插拔次数
+        try:
+            self.cycles_count = int(float(cycles_count))
+        except (TypeError, ValueError):
+            self.cycles_count = 0
+        try:
+            self.target_cycles = float(target_cycles)
+        except (TypeError, ValueError):
+            self.target_cycles = 0.0
         self.window = context.window
         self.hwnd = None
         self.hdn = None
@@ -87,7 +93,7 @@ class Notification:
             self.context.log(
                 f"检测到 USB 设备接入: {dbch.name}，当前插拔次数: {self.cycles_count}"
             )
-        if self.cycles_count >= self.target_cycles:
+        if self.target_cycles and self.cycles_count >= self.target_cycles:
             self.context.record_count_progress_if_current(
                 self.target_cycles,
                 self.cycles_count,

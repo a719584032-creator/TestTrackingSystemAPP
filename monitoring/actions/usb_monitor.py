@@ -14,10 +14,39 @@ def run(
     context: "Patvs_Fuction",
     target_cycles: float,
     usb_done_event: Optional[threading.Event] = None,
+    *,
+    remaining_cycles: float | None = None,
 ) -> None:
-    """监控 USB 插拔事件。"""
+    """监控 USB 插拔事件，支持断点续跑。"""
 
-    notification = Notification(context, 0, target_cycles)
+    try:
+        total_target = float(target_cycles)
+    except (TypeError, ValueError):
+        total_target = 0.0
+    if total_target <= 0:
+        context.log("USB 插拔目标次数为 0，自动跳过。")
+        if usb_done_event:
+            usb_done_event.set()
+        else:
+            context.action_complete.set()
+        return
+
+    if remaining_cycles is None:
+        remaining = total_target
+    else:
+        try:
+            remaining = float(remaining_cycles)
+        except (TypeError, ValueError):
+            remaining = total_target
+    remaining = max(0.0, min(total_target, remaining))
+    completed = max(0.0, total_target - remaining)
+
+    if completed > 0:
+        context.log(
+            f"USB 插拔已累计 {completed:g} 次，剩余 {max(0.0, total_target - completed):g} 次。"
+        )
+
+    notification = Notification(context, completed, total_target)
     try:
         notification.messageLoop()
     finally:
