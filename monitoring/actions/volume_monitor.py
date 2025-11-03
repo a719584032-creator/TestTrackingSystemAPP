@@ -18,12 +18,22 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def _get_volume() -> float:
-    """读取当前系统主音量。"""
+    """读取当前系统主音量，确保及时释放 COM 资源。"""
 
     devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = cast(interface, POINTER(IAudioEndpointVolume))
-    return volume.GetMasterVolumeLevelScalar()
+    interface = None
+    volume = None
+    try:
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        volume = cast(interface, POINTER(IAudioEndpointVolume))
+        return volume.GetMasterVolumeLevelScalar()
+    finally:
+        # 在 COM 环境回收前主动释放引用，避免析构延后到 CoUninitialize 之后。
+        if volume is not None:
+            volume = None
+        if interface is not None:
+            interface = None
+        devices = None
 
 
 def run(
