@@ -92,10 +92,10 @@ class ResultDialog(QtWidgets.QDialog):
         self.resize(520, 480)
 
         layout = QtWidgets.QVBoxLayout(self)
-        header = QtWidgets.QLabel(f"当前用例：{case_title}")
-        header.setWordWrap(True)
-        header.setStyleSheet("font-weight: 600; font-size: 14px;")
-        layout.addWidget(header)
+        # header = QtWidgets.QLabel(f"当前用例：{case_title}")
+        # header.setWordWrap(True)
+        # header.setStyleSheet("font-weight: 600; font-size: 14px;")
+        # layout.addWidget(header)
 
         form = QtWidgets.QFormLayout()
         self._remark_edit = QtWidgets.QPlainTextEdit()
@@ -114,7 +114,7 @@ class ResultDialog(QtWidgets.QDialog):
         if device_hint:
             hint_label = QtWidgets.QLabel(device_hint)
             hint_label.setStyleSheet("color: #4B5563;")
-            form.addRow("执行机型", hint_label)
+            form.addRow("执行机型:", hint_label)
         layout.addLayout(form)
 
         attachment_box = QtWidgets.QGroupBox("截图 / 附件")
@@ -437,7 +437,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 alternate-background-color: #F9FAFB;
             }
             QTreeWidget::item {
-                padding: 6px 8px;
+                padding: 8px 10px;
             }
             QTreeWidget::item:selected {
                 background-color: #DBEAFE;
@@ -1729,10 +1729,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if entry.is_general:
             device_model_id = None
             plan_device_model_id = None
-            hint_text = "自动机型：通用"
+            hint_text = "通用"
         else:
             if entry.device_label:
-                hint_text = f"执行机型：{entry.device_label}"
+                hint_text = f"{entry.device_label}"
         return device_model_id, plan_device_model_id, hint_text
 
     def _submit_result(self, result: str) -> None:
