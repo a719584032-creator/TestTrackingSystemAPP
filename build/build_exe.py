@@ -5,10 +5,12 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BUILD_DIR = PROJECT_ROOT / "build"
+BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build() -> None:
-    spec_file = PROJECT_ROOT / "tts_client.spec"
+    spec_file = BUILD_DIR / "patvs_client.spec"
     if spec_file.exists():
         spec_file.unlink()
     cmd = [

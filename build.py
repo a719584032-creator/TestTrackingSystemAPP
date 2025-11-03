@@ -5,18 +5,20 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+BUILD_DIR = ROOT / "build"
+BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_executable(output_dir: str = "dist") -> None:
-    spec_file = ROOT / "patvs_client.spec"
+    spec_file = BUILD_DIR / "patvs_client.spec"
     if not spec_file.exists():
         spec_file.write_text(
             """
 # -*- mode: python -*-
 block_cipher = None
 
-a = Analysis(['main.py'],
-             pathex=['.'],
+a = Analysis(['../main.py'],
+             pathex=['..'],
              binaries=[],
              datas=[],
              hiddenimports=[],

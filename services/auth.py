@@ -4,9 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .config import SETTINGS
-from .security import decrypt_password, encrypt_password
-from .storage import load_json, save_json
+from config.settings import SETTINGS
+from utils.security import decrypt_password, encrypt_password
+from utils.storage import load_json, save_json
 
 
 @dataclass(slots=True)

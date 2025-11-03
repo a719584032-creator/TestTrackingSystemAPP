@@ -6,15 +6,15 @@ import sys
 
 from PyQt5 import QtWidgets
 
-from .core.api_client import ApiClient
-from .core.auth import AuthStore, RememberedCredentials
-from .core.exceptions import AuthenticationError, ClientError, NetworkError
-from .core.logging import configure_logging
-from .core.ota import OTAUpdater
-from .core.settings import WindowStateStore
-from .monitoring.manager import MonitoringManager
-from .ui.login_dialog import LoginDialog
-from .ui.main_window import MainWindow
+from monitoring.manager import MonitoringManager
+from services.api_client import ApiClient
+from services.auth import AuthStore, RememberedCredentials
+from services.ota import OTAUpdater
+from .login_dialog import LoginDialog
+from .main_window import MainWindow
+from .state import WindowStateStore
+from utils.exceptions import AuthenticationError, ClientError, NetworkError
+from utils.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 

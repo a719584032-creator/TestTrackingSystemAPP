@@ -1,4 +1,4 @@
-"""Main window hosting the execution workflow."""
+"""Qt widgets that power the main workflow window."""
 from __future__ import annotations
 
 import datetime as dt
@@ -10,9 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from ..core.api_client import ApiClient, encode_attachment
-from ..core.exceptions import AuthenticationError, ClientError, ValidationError
-from ..core.models import (
+from models import (
     CaseExecutionResult,
     Department,
     PlanCase,
@@ -20,9 +18,11 @@ from ..core.models import (
     Project,
     TestPlan,
 )
-from ..core.monitor_parser import MonitoringAction, parse_keywords, require_attachment
-from ..core.settings import WindowStateStore
-from ..monitoring.manager import MonitoringManager
+from monitoring.manager import MonitoringManager
+from monitoring.parser import MonitoringAction, parse_keywords, require_attachment
+from services.api_client import ApiClient, encode_attachment
+from ui.state import WindowStateStore
+from utils.exceptions import AuthenticationError, ClientError, ValidationError
 
 
 STATUS_COLORS = {

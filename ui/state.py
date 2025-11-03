@@ -5,8 +5,8 @@ from typing import Optional
 
 from PyQt5 import QtCore
 
-from .config import SETTINGS
-from .storage import load_json, save_json
+from config.settings import SETTINGS
+from utils.storage import load_json, save_json
 
 
 class WindowStateStore:

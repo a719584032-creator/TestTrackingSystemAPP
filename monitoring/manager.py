@@ -6,8 +6,8 @@ from typing import Sequence, Tuple
 
 from PyQt5 import QtCore
 
-from ..core.monitor_parser import MonitoringAction
-from monitoring.patvs_monitor import Patvs_Fuction
+from .patvs_monitor import Patvs_Fuction
+from .parser import MonitoringAction
 
 
 class MonitoringManager(QtCore.QObject):
