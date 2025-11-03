@@ -398,7 +398,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     border-radius: 10px;
                     padding: 6px 12px;
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: 18px;
                 }}
                 """
             )
