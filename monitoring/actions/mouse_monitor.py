@@ -16,6 +16,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
 
     click_count = 0
     listener_stopped = threading.Event()
+    expected_keys = {"鼠标点击"}
 
     def on_click(x, y, button, pressed):
         nonlocal click_count
@@ -23,6 +24,9 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
             click_count += 1
             context.log(
                 f"Mouse clicked at ({x}, {y}) with {button}. Total count: {click_count}"
+            )
+            context.record_count_progress_if_current(
+                target_cycles, click_count, expected_keys=expected_keys
             )
             if click_count >= target_cycles:
                 context.log("已完成目标点击次数. Exiting...")
@@ -45,4 +49,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
             stop_thread.join()
     finally:
         context.log("停止鼠标点击事件监控")
+        context.record_count_progress_if_current(
+            target_cycles, click_count, expected_keys=expected_keys
+        )
         context.action_complete.set()

@@ -27,6 +27,7 @@ def run(context: "Patvs_Fuction", target_change_count: float) -> None:
     previous_volume = _get_volume()
     change_count = 0
     context.log(f"初始系统音量: {previous_volume * 100:.2f}%")
+    expected_keys = {"音量"}
 
     while context.is_running and change_count < target_change_count:
         time.sleep(1)
@@ -37,9 +38,17 @@ def run(context: "Patvs_Fuction", target_change_count: float) -> None:
                 f"音量变化次数: {change_count}, 当前音量: {current_volume * 100:.2f}%"
             )
             previous_volume = current_volume
+            context.record_count_progress_if_current(
+                target_change_count, change_count, expected_keys=expected_keys
+            )
 
     if context.is_running:
-        context.log("音量变化次数已达到目标次数，退出监控。")
+        context.record_count_progress_if_current(
+            target_change_count, change_count, expected_keys=expected_keys
+        )
+        context.log(
+            f"音量变化次数已达到目标次数 ({target_change_count:g})，总计完成 {change_count} 次，退出监控。"
+        )
     else:
         context.log("退出音量加减事件监控。")
     context.action_complete.set()

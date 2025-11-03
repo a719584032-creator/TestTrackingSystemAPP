@@ -21,6 +21,9 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
         nonlocal key_count
         key_count += 1
         context.log(f"Key pressed: {pressed_key}. Total count: {key_count}")
+        context.record_count_progress_if_current(
+            target_cycles, key_count, expected_keys={"键盘按键"}
+        )
         if key_count >= target_cycles:
             context.log("检测到已完成目标键盘按键次数. Exiting...")
             listener_stopped.set()
@@ -42,4 +45,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
             stop_thread.join()
     finally:
         context.log("停止键盘按键监控")
+        context.record_count_progress_if_current(
+            target_cycles, key_count, expected_keys={"键盘按键"}
+        )
         context.action_complete.set()

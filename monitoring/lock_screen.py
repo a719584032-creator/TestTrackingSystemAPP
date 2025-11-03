@@ -8,8 +8,13 @@ import win32ts
 import uuid
 from PyQt5 import QtCore
 import logging
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .patvs_monitor import Patvs_Fuction
 
 
 class _WxCompat:
@@ -33,9 +38,10 @@ class WTSSESSION_NOTIFICATION(ctypes.Structure):
 
 
 class SessionNotificationHandler:
-    def __init__(self, target_cycles, window):
+    def __init__(self, context: "Patvs_Fuction", target_cycles):
         self.hwnd = None
-        self.window = window
+        self.context = context
+        self.window = context.window
         self.className = f"suopin_WindowClass_{uuid.uuid4()}"
         self.target_cycles = target_cycles
         self.lock_count = 0
@@ -54,10 +60,19 @@ class SessionNotificationHandler:
         if msg == WM_WTSSESSION_CHANGE:  # 使用自定义的常量
             if wparam == WTS_SESSION_LOCK:
                 self.lock_count += 1
-                wx.CallAfter(self.window.add_log_message, f"会话已锁定. 锁屏次数: {self.lock_count}")
+                self.context.log(f"会话已锁定. 锁屏次数: {self.lock_count}")
+                self.context.record_count_progress_if_current(
+                    self.target_cycles, self.lock_count, expected_keys={"锁屏"}
+                )
                 if self.lock_count >= self.target_cycles:
-                    wx.CallAfter(self.window.add_log_message,
-                                 f"已完成目标锁屏次数: {self.target_cycles} ，Exiting...")
+                    self.context.record_count_progress_if_current(
+                        self.target_cycles,
+                        self.lock_count,
+                        expected_keys={"锁屏"},
+                    )
+                    self.context.log(
+                        f"已完成目标锁屏次数: {self.target_cycles} ，Exiting..."
+                    )
                     win32ts.WTSUnRegisterSessionNotification(self.hwnd)
                     win32gui.DestroyWindow(self.hwnd)
                     win32gui.PostQuitMessage(0)
@@ -67,11 +82,11 @@ class SessionNotificationHandler:
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
     def run(self):
-        wx.CallAfter(self.window.add_log_message, "开始监控电脑锁屏事件")
+        self.context.log("开始监控电脑锁屏事件")
         try:
             win32gui.PumpMessages()
         except KeyboardInterrupt:
-            wx.CallAfter(self.window.add_log_message, "停止电脑锁屏监控.......")
+            self.context.log("停止电脑锁屏监控.......")
             win32ts.WTSUnRegisterSessionNotification(self.hwnd)
             win32gui.DestroyWindow(self.hwnd)
             win32gui.UnregisterClass(self.class_atom, None)
@@ -79,6 +94,6 @@ class SessionNotificationHandler:
             logger.error(f"未知错误 {e}")
 
 
-def monitor_locks(target_cycles, window):
-    handler = SessionNotificationHandler(target_cycles, window)
+def monitor_locks(context: "Patvs_Fuction", target_cycles):
+    handler = SessionNotificationHandler(context, target_cycles)
     handler.run()

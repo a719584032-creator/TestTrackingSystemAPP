@@ -17,12 +17,16 @@ def run(context: "Patvs_Fuction", target_cycles: float, key_name: Optional[str] 
     key_count = 0
     key = context.KEY_MAPPING.get(key_name.lower()) if key_name else None
     listener_stopped = threading.Event()
+    expected_keys = {key_name} if key_name else {"键盘按键"}
 
     def on_press(pressed_key):
         nonlocal key_count
         if key is None or pressed_key == key:
             key_count += 1
             context.log(f"Key pressed: {pressed_key}. Total count: {key_count}")
+            context.record_count_progress_if_current(
+                target_cycles, key_count, expected_keys=expected_keys
+            )
         if key_count >= target_cycles:
             context.log("Reached target keystroke count. Exiting...")
             listener_stopped.set()
@@ -44,4 +48,7 @@ def run(context: "Patvs_Fuction", target_cycles: float, key_name: Optional[str] 
             stop_thread.join()
     finally:
         context.log("Stopped monitoring keystrokes.")
+        context.record_count_progress_if_current(
+            target_cycles, key_count, expected_keys=expected_keys
+        )
         context.action_complete.set()

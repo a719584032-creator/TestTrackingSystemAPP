@@ -12,5 +12,5 @@ if TYPE_CHECKING:  # pragma: no cover
 def run(context: "Patvs_Fuction", target_cycles: float) -> None:
     """启动锁屏监控。"""
 
-    monitor_locks(target_cycles, context.window)
+    monitor_locks(context, target_cycles)
     context.action_complete.set()

@@ -25,6 +25,7 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
         keyword = AUDIO_EVENT_KEYWORDS[action_key]
         target_count_int = int(float(target_count)) if target_count is not None else 0
         target_count_int = max(0, target_count_int)
+        expected_keys = {display_action or action_key, action_key}
         if target_count_int == 0:
             context.log(
                 f"音频事件 {display_action or action_key} 目标次数为 0，自动跳过。"
@@ -41,6 +42,9 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
         if current_count >= target_count_int:
             context.log(
                 f"音频事件 {display_action or action_key} 已提前满足目标次数 {target_count_int}，当前计数 {current_count}。"
+            )
+            context.record_count_progress_if_current(
+                target_count_int, current_count, expected_keys=expected_keys
             )
             return
 
@@ -86,6 +90,11 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
                                 context.log(
                                     f"[{os.path.basename(path)}] 检测到 {keyword} ({current_count}/{target_count_int})"
                                 )
+                                context.record_count_progress_if_current(
+                                    target_count_int,
+                                    current_count,
+                                    expected_keys=expected_keys,
+                                )
                     line = file_obj.readline()
                 context.audio_log_offsets[path] = file_obj.tell()
                 if current_count >= target_count_int or not context.is_running:
@@ -99,9 +108,15 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
             context.log(
                 f"音频事件 {display_action or action_key} 已达到目标次数 {target_count_int}。"
             )
+            context.record_count_progress_if_current(
+                target_count_int, current_count, expected_keys=expected_keys
+            )
         else:
             context.log(
                 f"音频事件 {display_action or action_key} 监控结束，当前计数 {current_count}/{target_count_int}。"
+            )
+            context.record_count_progress_if_current(
+                target_count_int, current_count, expected_keys=expected_keys
             )
     except Exception as error:  # pragma: no cover - 兼容异常场景
         context.logger.error(

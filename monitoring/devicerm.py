@@ -27,15 +27,20 @@ import uuid
 GUID_DEVINTERFACE_USB_DEVICE = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 
 class Notification:
-    def __init__(self, cycles_count, target_cycles, window):
+    def __init__(self, context, cycles_count, target_cycles):
+        self.context = context
         self.cycles_count = cycles_count   # 初始化插拔次数
         self.target_cycles = target_cycles  # 目标的插拔次数
-        self.window = window
+        self.window = context.window
         self.hwnd = None
         self.hdn = None
         self.class_name = f"DeviceChange_WindowClass_{uuid.uuid4()}"
         self.init_notification_window()
-        logger.info(f"Initialized Notification with cycles_count: {self.cycles_count}, target_cycles: {self.target_cycles}")
+        logger.info(
+            "Initialized Notification with cycles_count: %s, target_cycles: %s",
+            self.cycles_count,
+            self.target_cycles,
+        )
 
     def init_notification_window(self):
         message_map = {win32con.WM_DEVICECHANGE: self.onDeviceChange}
@@ -70,14 +75,27 @@ class Notification:
         dbch = win32gui_struct.UnpackDEV_BROADCAST(lparam)
         if wparam == win32con.DBT_DEVICEREMOVECOMPLETE:
             self.cycles_count += 1
-            message = f"Device {dbch.name} removed, current count: {self.cycles_count}"
-            wx.CallAfter(self.window.add_log_message, message)
+            self.context.log(
+                f"检测到 USB 设备移除: {dbch.name}，当前插拔次数: {self.cycles_count}"
+            )
+            self.context.record_count_progress_if_current(
+                self.target_cycles,
+                self.cycles_count,
+                expected_keys={"usb插拔", "s3插拔"},
+            )
         elif wparam == win32con.DBT_DEVICEARRIVAL:
-            message = f"Device {dbch.name} arrived, current count: {self.cycles_count}"
-            wx.CallAfter(self.window.add_log_message, message)
+            self.context.log(
+                f"检测到 USB 设备接入: {dbch.name}，当前插拔次数: {self.cycles_count}"
+            )
         if self.cycles_count >= self.target_cycles:
-            message = f"检测到已完成设备插拔目标次数: {self.cycles_count}"
-            wx.CallAfter(self.window.add_log_message, message)
+            self.context.record_count_progress_if_current(
+                self.target_cycles,
+                self.cycles_count,
+                expected_keys={"usb插拔", "s3插拔"},
+            )
+            self.context.log(
+                f"USB 插拔任务已完成 {self.cycles_count} 次，目标次数为 {self.target_cycles} 次。"
+            )
             win32gui.PostQuitMessage(0)
 
         return 1
