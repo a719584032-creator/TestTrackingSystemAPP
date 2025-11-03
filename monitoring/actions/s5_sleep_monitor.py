@@ -68,12 +68,12 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                     time.sleep(1)
                     continue
             except Exception as exc:
-                context.logger.warning(f"Error reading event log: {exc}")
+                context.logger.debug(f"Error reading event log: {exc}")
                 if hand:
                     try:
                         win32evtlog.CloseEventLog(hand)
                     except Exception as close_exc:
-                        context.logger.warning(f"Error closing event log: {close_exc}")
+                        context.logger.debug(f"Error closing event log: {close_exc}")
                 hand = reopen_event_log()
                 time.sleep(1)
                 continue

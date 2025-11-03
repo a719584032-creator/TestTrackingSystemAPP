@@ -285,7 +285,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_filter.setMinimumWidth(200)
         filter_layout.addWidget(self._device_filter, 1, 1)
 
-        filter_layout.addWidget(QtWidgets.QLabel("目录"), 1, 2)
+        filter_layout.addWidget(QtWidgets.QLabel("模块目录"), 1, 2)
         self._directory_filter = QtWidgets.QComboBox()
         self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
         self._directory_filter.addItem("全部", None)
