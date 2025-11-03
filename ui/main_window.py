@@ -676,7 +676,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_pass_button_state(self) -> None:
         if self._awaiting_monitor_completion_for_pass:
             self._pass_btn.setEnabled(False)
-            self._pass_btn.setToolTip("时间监控进行中，计时完成后才能标记通过")
+            self._pass_btn.setToolTip("监控进行中，完成所有监控动作后才能标记通过")
         else:
             self._pass_btn.setEnabled(True)
             self._pass_btn.setToolTip("")
@@ -1697,9 +1697,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     )
                     if confirm != QtWidgets.QMessageBox.Yes:
                         return
-            self._awaiting_monitor_completion_for_pass = any(
-                "时间" in action.name for action in self._current_actions
-            )
+            self._awaiting_monitor_completion_for_pass = bool(self._current_actions)
             start_time = dt.datetime.now().isoformat()
             self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
             self._append_log("监控已启动")
@@ -1747,8 +1745,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if result == "pass" and self._awaiting_monitor_completion_for_pass:
             QtWidgets.QMessageBox.warning(
                 self,
-                "计时未完成",
-                "时间监控尚未完成，暂不能标记通过。",
+                "监控未完成",
+                "监控尚未完成，暂不能标记通过。",
             )
             return
         try:
