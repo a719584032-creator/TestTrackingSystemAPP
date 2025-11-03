@@ -23,6 +23,7 @@ from monitoring.parser import MonitoringAction, parse_keywords, require_attachme
 from services.api_client import ApiClient, encode_attachment
 from ui.state import WindowStateStore
 from utils.exceptions import AuthenticationError, ClientError, ValidationError
+from config.settings import SETTINGS
 
 
 STATUS_COLORS = {
@@ -229,7 +230,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
         self._auto_start_in_progress = False
 
-        self._state_file_path = self._resolve_state_path()
+        self._state_file_path = SETTINGS.ui_state_file
         self._restore_department_id: Optional[int] = None
         self._restore_project_id: Optional[int] = None
         self._restore_plan_id: Optional[int] = None
@@ -729,13 +730,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if state:
             self.restoreState(state)
 
-    def _resolve_state_path(self) -> str:
-        if os.name == "nt":
-            base_dir = r"C:\\PATVS"
-        else:
-            base_dir = os.path.join(os.path.expanduser("~"), "PATVS")
-        return os.path.join(base_dir, "window_state.json")
-
     def _state_username(self) -> str:
         if not isinstance(self._user, dict):
             return ""
@@ -759,14 +753,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if not username:
             return {}
         try:
-            with open(self._state_file_path, "r", encoding="utf-8") as state_file:
+            with self._state_file_path.open("r", encoding="utf-8") as state_file:
                 payload = json.load(state_file)
         except FileNotFoundError:
             return {}
         except Exception as exc:  # pragma: no cover - defensive cleanup
             self._logger.error("读取状态文件失败: %s", exc)
             try:
-                os.remove(self._state_file_path)
+                self._state_file_path.unlink(missing_ok=True)
             except OSError:
                 pass
             return {}
@@ -844,10 +838,8 @@ class MainWindow(QtWidgets.QMainWindow):
             state["selection"] = [selection[0], selection[1], selection[2], selection[3]]
 
         try:
-            directory = os.path.dirname(self._state_file_path)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
-            with open(self._state_file_path, "w", encoding="utf-8") as state_file:
+            self._state_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._state_file_path.open("w", encoding="utf-8") as state_file:
                 json.dump(state, state_file, ensure_ascii=False, indent=2)
         except OSError as exc:  # pragma: no cover - file IO errors are non-fatal
             self._logger.warning("保存状态失败: %s", exc)

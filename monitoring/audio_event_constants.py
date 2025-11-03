@@ -5,7 +5,9 @@ Each event code maps to a spec with keywords and a human-readable description.
 """
 from typing import Dict, List, Optional, TypedDict
 
-DEFAULT_LOG_DIR: str = r"C:\\PATVS\\logs"
+from config.settings import SETTINGS
+
+DEFAULT_LOG_DIR: str = str(SETTINGS.log_root / "logs")
 DEFAULT_FILE_PATTERNS: List[str] = ['*.log', '*.txt']
 
 class EventSpec(TypedDict):

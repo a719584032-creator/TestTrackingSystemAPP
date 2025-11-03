@@ -5,7 +5,6 @@ import datetime
 import json
 import logging
 import math
-import os
 import threading
 import time
 from typing import Callable
@@ -35,6 +34,7 @@ from .actions import (
     usb_monitor,
     volume_monitor,
 )
+from config.settings import SETTINGS
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 class Patvs_Fuction:
     """负责任务编排的监控上下文。"""
 
-    TEMP_FILE = r"C:\PATVS\temp_action_and_num.json"
+    TEMP_FILE = SETTINGS.monitoring_temp_file
     ENCRYPTION_KEY = b"JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
 
     KEY_MAPPING = {
@@ -388,8 +388,8 @@ class Patvs_Fuction:
         return fernet.decrypt(encrypted_data).decode()
 
     def load_session_state(self):
-        if os.path.exists(self.TEMP_FILE):
-            with open(self.TEMP_FILE, "rb") as file:
+        if self.TEMP_FILE.exists():
+            with self.TEMP_FILE.open("rb") as file:
                 encrypted_data = file.read()
                 decrypted_data = self.decrypt_data(encrypted_data)
                 data = json.loads(decrypted_data)
@@ -425,13 +425,13 @@ class Patvs_Fuction:
             }
         )
         encrypted_data = self.encrypt_data(data)
-        with open(self.TEMP_FILE, "wb") as file:
+        with self.TEMP_FILE.open("wb") as file:
             file.write(encrypted_data)
 
     @classmethod
     def remove_temp_file(cls):
-        if os.path.exists(cls.TEMP_FILE):
-            os.remove(cls.TEMP_FILE)
+        if cls.TEMP_FILE.exists():
+            cls.TEMP_FILE.unlink(missing_ok=True)
 
     def normalize_action(self, action):
         return action.lower().replace(" ", "")

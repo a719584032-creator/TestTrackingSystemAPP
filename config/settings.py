@@ -39,9 +39,11 @@ class ClientSettings:
     api: ApiSettings = ApiSettings()
     ota: OTASettings = OTASettings()
     remember_me_file: Path = PATVS_ROOT / "credentials.json"
+    ui_state_file: Path = CONFIG_DIR / "ui_state.json"
     window_state_file: Path = CONFIG_DIR / "window_state.json"
     monitoring_cache_file: Path = CONFIG_DIR / "monitoring_state.json"
     log_root: Path = PATVS_ROOT
+    monitoring_temp_file: Path = PATVS_ROOT / "temp_action_and_num.json"
 
 
 SETTINGS = ClientSettings()
