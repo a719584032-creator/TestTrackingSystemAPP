@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from ctypes import POINTER, cast
 from typing import TYPE_CHECKING
-
+from contextlib import suppress
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
@@ -17,23 +17,21 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
-def _get_volume() -> float:
-    """读取当前系统主音量，确保及时释放 COM 资源。"""
+def _open_endpoint():
+    """打开并返回 (devices, volume) 两个 COM 对象，调用方负责 _close_endpoint 释放。"""
+    devices = AudioUtilities.GetSpeakers()  # IMMDevice
+    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+    volume = cast(interface, POINTER(IAudioEndpointVolume))  # IAudioEndpointVolume*
+    return devices, volume
 
-    devices = AudioUtilities.GetSpeakers()
-    interface = None
-    volume = None
-    try:
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        return volume.GetMasterVolumeLevelScalar()
-    finally:
-        # 在 COM 环境回收前主动释放引用，避免析构延后到 CoUninitialize 之后。
+def _close_endpoint(devices, volume):
+    """显式释放 COM 对象，避免依赖 __del__ 在 CoUninitialize 之后再释放。"""
+    with suppress(Exception):
         if volume is not None:
-            volume = None
-        if interface is not None:
-            interface = None
-        devices = None
+            volume.Release()
+    with suppress(Exception):
+        if devices is not None:
+            devices.Release()
 
 
 def run(
@@ -41,8 +39,7 @@ def run(
     target_change_count: float,
     remaining_change_count: float | None = None,
 ) -> None:
-    """监控系统音量变化次数，支持断点续跑。"""
-
+    # === 参数与剩余次数计算，保持不变 ===
     try:
         total_target = float(target_change_count)
     except (TypeError, ValueError):
@@ -62,27 +59,32 @@ def run(
     remaining = max(0.0, min(total_target, remaining))
     change_count = max(0.0, total_target - remaining)
 
+    # === COM 初始化 ===
     coinited = False
     if pythoncom is not None:
         try:
             pythoncom.CoInitialize()
             coinited = True
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except Exception as exc:
             context.log(f"初始化音量监控 COM 环境失败: {exc}")
 
+    devices = None
+    volume = None
     try:
-        previous_volume = _get_volume()
+        # === 只打开一次端点，循环内复用 ===
+        devices, volume = _open_endpoint()
+
+        previous_volume = float(volume.GetMasterVolumeLevelScalar())
         context.log(f"初始系统音量: {previous_volume * 100:.2f}%")
         if change_count > 0:
             remaining_to_go = max(0.0, total_target - change_count)
-            context.log(
-                f"音量变化已累计 {change_count:g} 次，剩余 {remaining_to_go:g} 次。"
-            )
+            context.log(f"音量变化已累计 {change_count:g} 次，剩余 {remaining_to_go:g} 次。")
+
         expected_keys = {"音量"}
 
         while context.is_running and change_count < total_target:
             time.sleep(1)
-            current_volume = _get_volume()
+            current_volume = float(volume.GetMasterVolumeLevelScalar())
             if current_volume != previous_volume:
                 change_count += 1
                 context.log(
@@ -102,7 +104,11 @@ def run(
             )
         else:
             context.log("退出音量加减事件监控。")
+
     finally:
+        # 先释放所有 COM 指针，再反初始化 COM
+        _close_endpoint(devices, volume)
         context.action_complete.set()
         if pythoncom is not None and coinited:
-            pythoncom.CoUninitialize()
+            with suppress(Exception):
+                pythoncom.CoUninitialize()
