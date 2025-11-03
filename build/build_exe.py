@@ -1,30 +1,18 @@
-"""Helper script for building a standalone executable via PyInstaller."""
+"""Helper script that delegates to :mod:`build` to create an executable."""
 from __future__ import annotations
 
-import subprocess
+import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BUILD_DIR = PROJECT_ROOT / "build"
-BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
+def main() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(project_root))
 
-def build() -> None:
-    spec_file = BUILD_DIR / "tts_client.spec"
-    if spec_file.exists():
-        spec_file.unlink()
-    cmd = [
-        "pyinstaller",
-        "--noconfirm",
-        "--clean",
-        "--name",
-        "TTSClient",
-        "--add-data",
-        f"{(PROJECT_ROOT / 'resources').as_posix()}{':resources'}",
-        (PROJECT_ROOT / "main.py").as_posix(),
-    ]
-    subprocess.check_call(cmd, cwd=PROJECT_ROOT)
+    from build import build_executable
+
+    build_executable()
 
 
 if __name__ == "__main__":
-    build()
+    main()
