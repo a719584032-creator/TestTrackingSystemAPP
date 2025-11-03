@@ -7,6 +7,7 @@ import logging
 import math
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 import win32evtlog
@@ -43,6 +44,7 @@ class Patvs_Fuction:
     """负责任务编排的监控上下文。"""
 
     TEMP_FILE = SETTINGS.monitoring_temp_file
+    CACHE_FILE = SETTINGS.monitoring_cache_file
     ENCRYPTION_KEY = b"JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
 
     KEY_MAPPING = {
@@ -363,6 +365,7 @@ class Patvs_Fuction:
         normalized_start = self._normalize_start_time(start_time)
         count = 0
         last_record_number = 0
+        last_event_time = None
         handle = None
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
 
@@ -370,7 +373,7 @@ class Patvs_Fuction:
             handle = win32evtlog.OpenEventLog(None, "System")
         except Exception as exc:
             self.logger.warning(f"Failed to open event log for bootstrap scan: {exc}")
-            return normalized_start, 0, 0
+            return normalized_start, 0, 0, normalized_start
 
         try:
             while True:
@@ -385,6 +388,11 @@ class Patvs_Fuction:
                             record_number = getattr(event, "RecordNumber", 0) or 0
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            if (
+                                last_event_time is None
+                                or occurred_time > last_event_time
+                            ):
+                                last_event_time = occurred_time
         except Exception as exc:
             self.logger.warning(f"Error scanning existing events: {exc}")
         finally:
@@ -396,7 +404,10 @@ class Patvs_Fuction:
                         f"Error closing bootstrap event log: {close_exc}"
                     )
 
-        return normalized_start, count, last_record_number
+        if last_event_time is None:
+            last_event_time = normalized_start
+
+        return normalized_start, count, last_record_number, last_event_time
 
     def encrypt_data(self, data):
         fernet = Fernet(self.ENCRYPTION_KEY)
@@ -406,20 +417,74 @@ class Patvs_Fuction:
         fernet = Fernet(self.ENCRYPTION_KEY)
         return fernet.decrypt(encrypted_data).decode()
 
-    def load_session_state(self):
-        if self.TEMP_FILE.exists():
-            with self.TEMP_FILE.open("rb") as file:
+    def _read_session_payload(self, path: Path):
+        try:
+            with path.open("rb") as file:
                 encrypted_data = file.read()
-                decrypted_data = self.decrypt_data(encrypted_data)
-                data = json.loads(decrypted_data)
-                if data.get("case_id") == self.case_id:
-                    normalized_actions = []
-                    for action in data.get("actions", []):
-                        normalized = self._normalize_stored_action(action)
-                        if normalized:
-                            normalized_actions.append(normalized)
-                    return normalized_actions, data.get("start_time")
-        return [], None
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            self.logger.warning(f"读取监控临时文件 {path} 失败: {exc}")
+            return None
+        if not encrypted_data:
+            self.logger.warning(f"监控临时文件 {path} 内容为空，将忽略该文件。")
+            return None
+        try:
+            decrypted_data = self.decrypt_data(encrypted_data)
+            data = json.loads(decrypted_data)
+        except Exception as exc:
+            self.logger.warning(f"解密监控临时文件 {path} 失败: {exc}")
+            return None
+        return data
+
+    def _persist_session_payload(self, payload):
+        try:
+            serialized = json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            self.logger.warning(f"序列化监控状态失败: {exc}")
+            return
+        try:
+            encrypted_data = self.encrypt_data(serialized)
+        except Exception as exc:
+            self.logger.warning(f"加密监控状态失败: {exc}")
+            return
+
+        for path in {self.TEMP_FILE, self.CACHE_FILE}:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("wb") as file:
+                    file.write(encrypted_data)
+            except Exception as exc:
+                self.logger.warning(f"写入监控临时文件 {path} 失败: {exc}")
+
+    def load_session_state(self):
+        data = self._read_session_payload(self.TEMP_FILE)
+        restored_from_cache = False
+        if data is None:
+            data = self._read_session_payload(self.CACHE_FILE)
+            if data is not None:
+                restored_from_cache = True
+                self.logger.warning(
+                    "检测到 temp_action_and_num.json 缺失，尝试从备份缓存恢复监控进度。"
+                )
+
+        if not data or data.get("case_id") != self.case_id:
+            if restored_from_cache and data and data.get("case_id") != self.case_id:
+                self.logger.warning("备份缓存中的监控状态与当前用例不匹配，已忽略。")
+            return [], None, False
+
+        if restored_from_cache:
+            self._persist_session_payload(data)
+
+        normalized_actions = []
+        for action in data.get("actions", []):
+            normalized = self._normalize_stored_action(action)
+            if normalized:
+                normalized_actions.append(normalized)
+        completed = bool(data.get("completed"))
+        if completed and not normalized_actions:
+            return [], None, True
+        return normalized_actions, data.get("start_time"), completed
 
     def request_session_reset(self):
         """Mark the current session as invalid so it will not resume next time."""
@@ -434,23 +499,24 @@ class Patvs_Fuction:
             actions_snapshot = [dict(action) for action in self.remaining_actions]
             start_time = self.case_start_time
             case_id = self.case_id
+        session_completed = not actions_snapshot
         logger.debug("开始保存临时文件")
         logger.debug(actions_snapshot)
-        data = json.dumps(
-            {
-                "case_id": case_id,
-                "actions": actions_snapshot,
-                "start_time": start_time,
-            }
-        )
-        encrypted_data = self.encrypt_data(data)
-        with self.TEMP_FILE.open("wb") as file:
-            file.write(encrypted_data)
+        payload = {
+            "case_id": case_id,
+            "actions": actions_snapshot,
+            "start_time": start_time,
+            "completed": session_completed,
+        }
+        self._persist_session_payload(payload)
 
     @classmethod
     def remove_temp_file(cls):
-        if cls.TEMP_FILE.exists():
-            cls.TEMP_FILE.unlink(missing_ok=True)
+        for path in {cls.TEMP_FILE, cls.CACHE_FILE}:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning(f"删除监控临时文件 {path} 失败: {exc}")
 
     def normalize_action(self, action):
         return action.lower().replace(" ", "")
@@ -458,21 +524,26 @@ class Patvs_Fuction:
     def run_main(self, case_id, action_and_num, start_time):
         try:
             self.case_id = case_id
-            stored_actions, stored_start_time = self.load_session_state()
+            stored_actions, stored_start_time, session_completed = self.load_session_state()
             if stored_actions:
                 self.remaining_actions = stored_actions
+                case_start_time = stored_start_time or start_time
             else:
                 self.remaining_actions = [
                     self._build_action_state(action, amount)
                     for action, amount in action_and_num
                 ]
-
-            case_start_time = stored_start_time or start_time
+                case_start_time = start_time
             if isinstance(case_start_time, datetime.datetime):
                 case_start_time = case_start_time.isoformat()
             if not case_start_time:
                 case_start_time = datetime.datetime.now().isoformat()
             self.case_start_time = case_start_time
+
+            if not stored_actions and session_completed:
+                self.logger.warning(
+                    "检测到上一次监控已完成，为当前用例重新开始新的监控会话。"
+                )
 
             self.log("请按照提示依次执行以下动作:")
             with self.state_lock:
@@ -695,11 +766,15 @@ class Patvs_Fuction:
 
             with self.state_lock:
                 has_remaining = bool(self.remaining_actions)
-            if not has_remaining or self.session_reset_requested:
-                self.logger.warning("所有动作执行完毕，开始删除临时文件")
+            if self.session_reset_requested:
+                self.logger.warning("收到会话重置请求，开始删除临时文件")
                 self.remove_temp_file()
-            else:
+            elif has_remaining:
                 self.logger.warning("检测到未完成的动作，保留临时文件以便下次继续执行")
+            else:
+                self.logger.warning(
+                    "所有动作执行完毕，本次将保留临时文件，确保重启后仍可读取上次执行记录。"
+                )
             self.logger.warning("所有动作执行完毕，解禁按钮")
             time.sleep(1)
             self.call_after(self.window.after_test)

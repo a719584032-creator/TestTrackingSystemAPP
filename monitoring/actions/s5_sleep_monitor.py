@@ -22,9 +22,15 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
         context.action_complete.set()
         return
 
-    start_time, total, last_record_number = context._bootstrap_event_progress(
+    (
+        start_time,
+        total,
+        last_record_number,
+        last_event_time,
+    ) = context._bootstrap_event_progress(
         start_time, lambda event: event.EventID == 7001
     )
+    last_seen_time = last_event_time
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s5")
     if total:
@@ -76,10 +82,19 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                 if event.EventID == 7001:
                     occurred_time = event.TimeGenerated
                     record_number = getattr(event, "RecordNumber", 0) or 0
-                    if occurred_time > start_time and record_number > last_record_number:
+                    if occurred_time <= start_time:
+                        continue
+                    if record_number > last_record_number:
+                        last_record_number = record_number
+                        last_seen_time = occurred_time
                         total += 1
-                        if record_number > last_record_number:
-                            last_record_number = record_number
+                        context._record_count_progress(
+                            target_cycles, total, action_key="s5"
+                        )
+                    elif record_number <= 0 or occurred_time > last_seen_time:
+                        last_record_number = record_number
+                        last_seen_time = occurred_time
+                        total += 1
                         context._record_count_progress(
                             target_cycles, total, action_key="s5"
                         )
