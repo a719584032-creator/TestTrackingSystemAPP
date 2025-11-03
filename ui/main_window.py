@@ -373,47 +373,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
         stats_box = QtWidgets.QWidget()
         stats_box.setStyleSheet(
-            "background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 8px;"
+            "background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;"
         )
         stats_layout = QtWidgets.QHBoxLayout(stats_box)
-        stats_layout.setContentsMargins(8, 10, 8, 10)
-        stats_layout.setSpacing(0)
-        self._plan_stat_labels: Dict[str, QtWidgets.QLabel] = {}
+        stats_layout.setContentsMargins(12, 10, 12, 10)
+        stats_layout.setSpacing(8)
+        self._plan_stat_labels: Dict[str, Tuple[QtWidgets.QLabel, str]] = {}
         stat_configs = [
-            ("total", "总数", "#111827"),
-            ("executed", "已执行", "#0F766E"),
-            ("pass", "通过", "#047857"),
-            ("fail", "失败", "#B91C1C"),
-            ("block", "阻塞", "#B45309"),
-            ("notrun", "未执行", "#4B5563"),
+            ("total", "总数", "#EEF2FF", "#1E3A8A"),
+            ("executed", "已执行", "#ECFEFF", "#155E75"),
+            ("pass", "通过", "#DCFCE7", "#047857"),
+            ("fail", "失败", "#FEE2E2", "#B91C1C"),
+            ("block", "阻塞", "#FEF3C7", "#B45309"),
+            ("notrun", "未执行", "#E5E7EB", "#374151"),
         ]
-        for index, (key, title, color) in enumerate(stat_configs):
-            column_widget = QtWidgets.QWidget()
-            column_layout = QtWidgets.QVBoxLayout(column_widget)
-            column_layout.setContentsMargins(12, 4, 12, 4)
-            column_layout.setSpacing(2)
-
-            value_label = QtWidgets.QLabel("0")
-            value_label.setAlignment(QtCore.Qt.AlignCenter)
-            value_label.setStyleSheet(
-                f"font-size: 18px; font-weight: 600; color: {color};"
+        for key, title, bg, fg in stat_configs:
+            pill = QtWidgets.QLabel(f"{title} 0")
+            pill.setAlignment(QtCore.Qt.AlignCenter)
+            pill.setStyleSheet(
+                f"""
+                QLabel {{
+                    background-color: {bg};
+                    color: {fg};
+                    border-radius: 10px;
+                    padding: 6px 12px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+                """
             )
-            caption_label = QtWidgets.QLabel(title)
-            caption_label.setAlignment(QtCore.Qt.AlignCenter)
-            caption_label.setStyleSheet("font-size: 12px; color: #6B7280;")
-
-            column_layout.addWidget(value_label)
-            column_layout.addWidget(caption_label)
-
-            stats_layout.addWidget(column_widget, 1)
-            self._plan_stat_labels[key] = value_label
-
-            if index < len(stat_configs) - 1:
-                divider = QtWidgets.QFrame()
-                divider.setFrameShape(QtWidgets.QFrame.VLine)
-                divider.setFrameShadow(QtWidgets.QFrame.Plain)
-                divider.setStyleSheet("color: #E5E7EB;")
-                stats_layout.addWidget(divider)
+            stats_layout.addWidget(pill)
+            self._plan_stat_labels[key] = (pill, title)
+        stats_layout.addStretch()
         plan_layout.addWidget(stats_box)
 
         root_layout.addWidget(plan_box)
@@ -1325,8 +1316,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._plan_title_label.setText("未选择计划")
             self._plan_period_label.setText("执行时间：—")
             self._plan_tester_label.setText("执行人员：—")
-            for label in self._plan_stat_labels.values():
-                label.setText("0")
+            for key, (label, title) in self._plan_stat_labels.items():
+                label.setText(f"{title} 0")
             return
 
         if detail.start_date and detail.end_date:
@@ -1367,8 +1358,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 }
             )
 
-        for key, label in self._plan_stat_labels.items():
-            label.setText(str(stats_values.get(key, 0)))
+        for key, (label, title) in self._plan_stat_labels.items():
+            label.setText(f"{title} {stats_values.get(key, 0)}")
 
     def _refresh_case_tree(self) -> None:
         self._case_tree.blockSignals(True)
