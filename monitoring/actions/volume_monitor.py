@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from ctypes import POINTER, cast
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from comtypes import CLSCTX_ALL
@@ -18,12 +19,29 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def _get_volume() -> float:
-    """读取当前系统主音量。"""
+    """读取当前系统主音量，确保及时释放 COM 资源。"""
 
     devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = cast(interface, POINTER(IAudioEndpointVolume))
-    return volume.GetMasterVolumeLevelScalar()
+    interface = None
+    volume = None
+    try:
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        volume = cast(interface, POINTER(IAudioEndpointVolume))
+        return volume.GetMasterVolumeLevelScalar()
+    finally:
+        # 在 COM 环境回收前主动释放引用，避免析构延后到 CoUninitialize 之后。
+        if volume is not None:
+            with suppress(Exception):
+                volume.Release()
+            volume = None
+        if interface is not None:
+            with suppress(Exception):
+                interface.Release()
+            interface = None
+        if devices is not None:
+            with suppress(Exception):
+                devices.Release()
+            devices = None
 
 
 def run(
