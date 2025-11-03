@@ -10,7 +10,7 @@ BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_executable(output_dir: str = "dist") -> None:
-    spec_file = BUILD_DIR / "patvs_client.spec"
+    spec_file = BUILD_DIR / "tts_client.spec"
     if not spec_file.exists():
         spec_file.write_text(
             """

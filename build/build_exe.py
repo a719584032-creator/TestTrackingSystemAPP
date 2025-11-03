@@ -10,7 +10,7 @@ BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build() -> None:
-    spec_file = BUILD_DIR / "patvs_client.spec"
+    spec_file = BUILD_DIR / "tts_client.spec"
     if spec_file.exists():
         spec_file.unlink()
     cmd = [
