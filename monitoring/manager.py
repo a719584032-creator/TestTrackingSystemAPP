@@ -31,6 +31,15 @@ class MonitoringManager(QtCore.QObject):
             return
         self._worker.is_running = False
 
+    def discard_session_state(self) -> None:
+        """Clear any persisted monitoring progress for the active worker."""
+
+        worker = self._worker
+        if worker is not None:
+            worker.request_session_reset()
+        else:
+            Patvs_Fuction.remove_temp_file()
+
     def start(self, case_id: int, actions: Sequence[MonitoringAction], start_time: str) -> None:
         if self.is_running():
             self.monitoring_error.emit("已有监控任务正在执行，请先停止当前任务")

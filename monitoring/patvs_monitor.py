@@ -163,6 +163,7 @@ class Patvs_Fuction:
         self.audio_event_cache: dict[str, int] = {}
         self.case_start_time: str | None = None
         self.state_lock = threading.Lock()
+        self.session_reset_requested = False
 
     # ------------------------------------------------------------------
     def log(self, message: str) -> None:
@@ -401,7 +402,15 @@ class Patvs_Fuction:
                     return normalized_actions, data.get("start_time")
         return [], None
 
+    def request_session_reset(self):
+        """Mark the current session as invalid so it will not resume next time."""
+
+        self.session_reset_requested = True
+        self.remove_temp_file()
+
     def save_session_state(self):
+        if self.session_reset_requested:
+            return
         with self.state_lock:
             actions_snapshot = [dict(action) for action in self.remaining_actions]
             start_time = self.case_start_time
@@ -419,9 +428,10 @@ class Patvs_Fuction:
         with open(self.TEMP_FILE, "wb") as file:
             file.write(encrypted_data)
 
-    def remove_temp_file(self):
-        if os.path.exists(self.TEMP_FILE):
-            os.remove(self.TEMP_FILE)
+    @classmethod
+    def remove_temp_file(cls):
+        if os.path.exists(cls.TEMP_FILE):
+            os.remove(cls.TEMP_FILE)
 
     def normalize_action(self, action):
         return action.lower().replace(" ", "")
@@ -666,7 +676,7 @@ class Patvs_Fuction:
 
             with self.state_lock:
                 has_remaining = bool(self.remaining_actions)
-            if not has_remaining:
+            if not has_remaining or self.session_reset_requested:
                 self.logger.warning("所有动作执行完毕，开始删除临时文件")
                 self.remove_temp_file()
             else:
