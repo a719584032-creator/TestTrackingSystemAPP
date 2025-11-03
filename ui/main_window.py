@@ -1792,6 +1792,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._monitoring.is_running():
             self._monitoring.stop()
             self._append_log("监控停止请求已发送")
+        self._monitoring.discard_session_state()
         self._awaiting_monitor_completion_for_pass = False
         try:
             self._api.submit_result(
