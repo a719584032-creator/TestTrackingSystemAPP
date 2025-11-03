@@ -36,6 +36,7 @@ def run(
                 if not plugged_in:
                     plug_unplug_cycles += 1
                     context.log(f"电源插拔完成次数: {plug_unplug_cycles}")
+                    context._record_count_progress(target_cycles, plug_unplug_cycles)
                     if plug_unplug_cycles >= target_cycles:
                         context.log(
                             f"已完成目标插拔次数:{plug_unplug_cycles} ，Exiting...."
