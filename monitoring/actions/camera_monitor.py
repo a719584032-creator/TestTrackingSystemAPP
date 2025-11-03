@@ -16,6 +16,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
     cycle_count = 0
     last_camera_state = None
     cycle_started = False
+    expected_keys = {"摄像头", "camera"}
 
     while context.is_running and cycle_count < target_cycles:
         cap = cv2.VideoCapture(0)
@@ -31,6 +32,9 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
                 cycle_count += 1
                 cycle_started = False
                 context.log(f"检测到摄像头可以调用，完成一个开关周期！当前周期数：{cycle_count}")
+                context.record_count_progress_if_current(
+                    target_cycles, cycle_count, expected_keys=expected_keys
+                )
 
         last_camera_state = current_camera_state
         if cycle_count >= target_cycles:
@@ -38,5 +42,8 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
             break
         time.sleep(1)
 
+    context.record_count_progress_if_current(
+        target_cycles, cycle_count, expected_keys=expected_keys
+    )
     context.log("退出摄像头开关事件监控。")
     context.action_complete.set()

@@ -16,6 +16,7 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
     previous_brightness = None
     off_cycle_count = 0
     was_display_on = True
+    expected_keys = {"显示器"}
 
     while context.is_running and off_cycle_count < target_cycles:
         try:
@@ -33,13 +34,21 @@ def run(context: "Patvs_Fuction", target_cycles: float) -> None:
             if was_display_on and previous_brightness:
                 off_cycle_count += 1
                 context.log(f"显示器关闭周期完成: {off_cycle_count} 次")
+                context.record_count_progress_if_current(
+                    target_cycles, off_cycle_count, expected_keys=expected_keys
+                )
             was_display_on = False
             previous_brightness = None
 
         time.sleep(5)
 
     if context.is_running:
-        context.log("显示器开关次数已达到目标次数，退出监控。")
+        context.record_count_progress_if_current(
+            target_cycles, off_cycle_count, expected_keys=expected_keys
+        )
+        context.log(
+            f"显示器开关次数已达到目标次数 ({target_cycles:g})，总计完成 {off_cycle_count} 次，退出监控。"
+        )
     else:
         context.log("退出显示器开关监控。")
     context.action_complete.set()

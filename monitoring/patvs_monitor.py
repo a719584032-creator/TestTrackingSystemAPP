@@ -278,6 +278,25 @@ class Patvs_Fuction:
             remaining = 0.0
         self._update_current_action_remaining(max(0.0, remaining))
 
+    def record_count_progress_if_current(self, target, completed, expected_keys=None):
+        """更新当前动作的次数进度，避免串扰其他动作。"""
+
+        normalized_expected = None
+        if expected_keys:
+            normalized_expected = {
+                self.normalize_action(key)
+                for key in expected_keys
+                if key is not None
+            }
+        with self.state_lock:
+            if not self.remaining_actions:
+                return
+            current_name = self.remaining_actions[0]["name"]
+        normalized_current = self.normalize_action(current_name)
+        if normalized_expected and normalized_current not in normalized_expected:
+            return
+        self._record_count_progress(target, completed, action_key=normalized_current)
+
     def _record_time_progress(self, remaining_seconds):
         with self.state_lock:
             current_name = (

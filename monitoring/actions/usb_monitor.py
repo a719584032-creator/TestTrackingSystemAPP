@@ -17,7 +17,7 @@ def run(
 ) -> None:
     """监控 USB 插拔事件。"""
 
-    notification = Notification(0, target_cycles, context.window)
+    notification = Notification(context, 0, target_cycles)
     try:
         notification.messageLoop()
     finally:
