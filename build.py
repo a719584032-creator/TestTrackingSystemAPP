@@ -79,6 +79,7 @@ def build_executable(output_dir: str = "dist") -> None:
         str(BUILD_DIR),
         "--paths",
         str(ROOT),
+        "--noconsole"
     ]
 
     for source, destination in data_entries:
