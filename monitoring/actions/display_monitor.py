@@ -10,6 +10,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
+MAX_MONITORED_DEVICES = 3
+
+
 def run(
     context: "Patvs_Fuction",
     target_cycles: float,
@@ -35,9 +38,8 @@ def run(
             remaining = total_target
     remaining = max(0.0, min(total_target, remaining))
 
-    previous_brightness = None
     off_cycle_count = max(0.0, total_target - remaining)
-    was_display_on = True
+    device_states: list[bool | None] = [None] * MAX_MONITORED_DEVICES
     expected_keys = {"显示器"}
 
     if off_cycle_count > 0:
@@ -46,26 +48,39 @@ def run(
         )
 
     while context.is_running and off_cycle_count < total_target:
-        try:
-            current_brightness = sbc.get_brightness(display=0)
-            context.log(f"当前显示器亮度: {current_brightness}")
-            if current_brightness == 0:
-                raise RuntimeError("Brightness is 0, assuming display is off.")
+        cycle_incremented = False
+        for device_index in range(MAX_MONITORED_DEVICES):
+            try:
+                brightness = sbc.get_brightness(display=device_index)
+                if isinstance(brightness, list):
+                    brightness = brightness[0] if brightness else 0
+                context.log(f"显示器 {device_index} 当前亮度: {brightness}")
+                current_state = bool(brightness)
+            except Exception as exc:
+                context.log(f"检测到显示器 {device_index} 已关闭: {exc}")
+                current_state = False
 
-            if previous_brightness is None:
-                previous_brightness = current_brightness
+            previous_state = device_states[device_index]
+            device_states[device_index] = current_state
 
-            was_display_on = True
-        except Exception as exc:
-            context.log(f"检测到屏幕已关闭: {exc}")
-            if was_display_on and previous_brightness:
+            if previous_state is None or cycle_incremented:
+                continue
+
+            if previous_state and not current_state:
                 off_cycle_count += 1
-                context.log(f"显示器关闭周期完成: {off_cycle_count} 次")
+                cycle_incremented = True
+                context.log(
+                    f"显示器 {device_index} 关闭周期完成: {off_cycle_count} 次"
+                )
                 context.record_count_progress_if_current(
                     total_target, off_cycle_count, expected_keys=expected_keys
                 )
-            was_display_on = False
-            previous_brightness = None
+
+            if off_cycle_count >= total_target:
+                break
+
+        if off_cycle_count >= total_target:
+            break
 
         time.sleep(5)
 

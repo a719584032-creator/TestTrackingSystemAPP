@@ -10,6 +10,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
+MAX_MONITORED_DEVICES = 3
+
+
 def run(
     context: "Patvs_Fuction",
     target_cycles: float,
@@ -40,8 +43,8 @@ def run(
     remaining = max(0.0, min(total_target, remaining))
 
     cycle_count = max(0.0, total_target - remaining)
-    last_camera_state = None
-    cycle_started = False
+    device_states: list[bool | None] = [None] * MAX_MONITORED_DEVICES
+    cycles_started = [False] * MAX_MONITORED_DEVICES
     expected_keys = {"摄像头", "camera"}
 
     if cycle_count > 0:
@@ -50,24 +53,45 @@ def run(
         )
 
     while context.is_running and cycle_count < total_target:
-        cap = cv2.VideoCapture(0)
-        ret, _ = cap.read()
-        cap.release()
-        current_camera_state = ret
+        for device_index in range(MAX_MONITORED_DEVICES):
+            cap = cv2.VideoCapture(device_index)
+            try:
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                else:
+                    ret = False
+            except Exception:
+                ret = False
+            finally:
+                cap.release()
 
-        if last_camera_state is not None:
-            if not cycle_started and last_camera_state and not current_camera_state:
-                cycle_started = True
-                context.log("检测到摄像头被占用，开关周期开始。")
-            elif cycle_started and not last_camera_state and current_camera_state:
+            current_state = bool(ret)
+            previous_state = device_states[device_index]
+            device_states[device_index] = current_state
+
+            if previous_state is None:
+                continue
+
+            if not cycles_started[device_index] and previous_state and not current_state:
+                cycles_started[device_index] = True
+                context.log(f"检测到摄像头 {device_index} 被占用，开关周期开始。")
+            elif (
+                cycles_started[device_index]
+                and not previous_state
+                and current_state
+            ):
                 cycle_count += 1
-                cycle_started = False
-                context.log(f"检测到摄像头可以调用，完成一个开关周期！当前周期数：{cycle_count}")
+                cycles_started[device_index] = False
+                context.log(
+                    f"检测到摄像头 {device_index} 可以调用，完成一个开关周期！当前周期数：{cycle_count}"
+                )
                 context.record_count_progress_if_current(
                     total_target, cycle_count, expected_keys=expected_keys
                 )
 
-        last_camera_state = current_camera_state
+            if cycle_count >= total_target:
+                break
+
         if cycle_count >= total_target:
             context.log(f"摄像头开关周期数已达到目标值 ({total_target})，退出检测。")
             break
