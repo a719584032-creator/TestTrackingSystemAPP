@@ -52,6 +52,8 @@ class MonitoringController(QtCore.QObject):
         if self._worker is None:
             return
         self._worker.is_running = False
+        # 确保当前等待的动作线程被唤醒，避免主调度卡在 action_complete.wait()
+        self._worker.action_complete.set()
 
     def start(self, case_id: int, actions: Sequence[Tuple[str, float]], start_time: str) -> None:
         if self.is_running():
@@ -86,3 +88,4 @@ class MonitoringController(QtCore.QObject):
             thread.join(timeout=0)
         if worker:
             worker.is_running = False
+            worker.action_complete.set()
