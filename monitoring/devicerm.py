@@ -90,9 +90,10 @@ class Notification:
                 expected_keys={"usb插拔", "s3插拔"},
             )
         elif wparam == win32con.DBT_DEVICEARRIVAL:
-            self.context.log(
-                f"检测到 USB 设备接入: {dbch.name}，当前插拔次数: {self.cycles_count}"
-            )
+            pass
+            # self.context.log(
+            #     f"检测到 USB 设备接入: {dbch.name}，当前插拔次数: {self.cycles_count}"
+            # )
         if self.target_cycles and self.cycles_count >= self.target_cycles:
             self.context.record_count_progress_if_current(
                 self.target_cycles,

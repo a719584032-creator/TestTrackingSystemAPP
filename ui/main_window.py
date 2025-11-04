@@ -238,7 +238,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.restore_state()
 
         self.setWindowTitle("TTS 测试执行客户端")
-        self.resize(1280, 720)
+        self.resize(1200, 680)
+        self.setMinimumSize(1024, 640)
         self._build_ui()
         self._connect_signals()
         self._restore_window_state()

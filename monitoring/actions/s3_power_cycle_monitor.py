@@ -57,7 +57,7 @@ def run(
         total_target, s3_completed=s3_completed, power_completed=power_completed
     )
 
-    context.log(f"开始执行监控: S3电源插拔，目标测试次数: {int(total_target)}")
+    #context.log(f"开始执行监控: S3电源插拔，目标测试次数: {int(total_target)}")
     if combined_completed >= total_target:
         context.log("所有插拔+S3循环已完成！")
         context.action_complete.set()
