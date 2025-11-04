@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tts-client = "main:main"
+tts-client = "run:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -38,4 +38,4 @@ include = [
 ]
 
 [tool.setuptools]
-py-modules = ["main", "run", "build"]
+py-modules = ["run", "build"]
