@@ -91,7 +91,7 @@ def build_executable(output_dir: str = "dist") -> None:
     for module_name in hidden_imports:
         cmd.extend(["--hidden-import", module_name])
 
-    cmd.append(str(ROOT / "main.py"))
+    cmd.append(str(ROOT / "run.py"))
 
     subprocess.run(cmd, check=True)
 

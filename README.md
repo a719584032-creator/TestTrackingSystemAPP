@@ -12,10 +12,9 @@
 ## 目录总览
 ```
 TestTrackingSystemAPP/
-├── main.py / __main__.py  # 程序入口，委托给 Qt 应用
-├── run.py                 # 直接启动客户端的辅助脚本
+├── run.py                 # 直接启动客户端的入口脚本
 ├── build.py               # PyInstaller 打包工具
-├── build/                 # 打包配置与脚本
+├── build/                 # 打包配置与资源
 ├── config/                # 配置与路径管理
 ├── services/              # 与后端/本地存储交互的服务层
 ├── models/                # 领域模型定义
@@ -33,7 +32,7 @@ TestTrackingSystemAPP/
 ## 核心模块说明
 | 模块 | 说明 |
 | --- | --- |
-| `main.py` / `run.py` | 命令行入口，包装并调用 `ui.application.main`，保持 `python -m TestTrackingSystemAPP` 与直接运行脚本的兼容性。 |
+| `run.py` | 命令行入口，包装并调用 `ui.application.main`，供源码运行与 `tts-client` 脚本复用。 |
 | `ui/application.py`、`ui/login_dialog.py`、`ui/main_window.py` | 负责 Qt 应用装配与 UI 交互：登录流程、主界面、监控日志、结果提交流程等。 |
 | `ui/state.py` | 处理窗口几何状态的持久化，读取/写入 JSON。 |
 | `services/api_client.py` | 封装与 TTS 后端的 HTTP 交互：登录、部门/项目/计划查询、执行结果提交等。 |
@@ -44,7 +43,7 @@ TestTrackingSystemAPP/
 | `monitoring/manager.py`、`monitoring/parser.py` | Qt 适配层，解析监控关键字并调用遗留的硬件监控实现。 |
 | `utils/logging.py`、`utils/storage.py`、`utils/security.py`、`utils/exceptions.py` | 提供日志配置、JSON 读写、凭据加解密、异常定义等通用能力。 |
 | `resources/__init__.py` | 指向静态资源目录的路径常量，供 UI 或打包脚本引用。 |
-| `build.py`、`build/build_exe.py` | 两种 PyInstaller 打包方式：自动生成 spec 文件或通过命令行参数打包。 |
+| `build.py` | PyInstaller 打包脚本，生成独立可执行文件。 |
 
 ## 安装与运行
 1. **准备环境**
@@ -67,15 +66,12 @@ TestTrackingSystemAPP/
      ```
 
 3. **启动客户端**
-   - 命令行入口：
+   - 直接运行源码：
      ```bash
-     python -m TestTrackingSystemAPP
-     ```
-   - 或显式执行兼容入口：
-     ```bash
-     python -m TestTrackingSystemAPP.main
+     python run.py
      ```
    - 安装为可执行脚本后，也可通过 `tts-client` 命令启动（`pyproject.toml` 中的 `project.scripts` 定义）。
+   - 若使用 PyInstaller 打包，可直接双击生成的 `.exe` 文件运行。
 
 ## 配置与运行时数据
 - **API 地址**：默认值定义在 `config/settings.py` 中，可直接修改 `ClientSettings.api.base_url` 或在运行前加载自定义配置。
@@ -92,16 +88,8 @@ TestTrackingSystemAPP/
    ```bash
    python build.py
    ```
-   > 说明：`build.py` 位于仓库根目录。如果希望通过 `python -m TestTrackingSystemAPP.build` 调用，需要在其上一级目录执行，否则 Python 无法定位 `TestTrackingSystemAPP` 包而报 `ModuleNotFoundError`。
-3. 首次执行会自动生成 `patvs_client.spec`，随后在 `dist/` 下输出可执行包。 【F:build.py†L1-L52】
-
-### 使用 `build/build_exe.py`
-1. 适合需要自定义名称或捆绑 `resources/` 目录的场景。
-2. 执行：
-   ```bash
-   python build/build_exe.py
-   ```
-3. 生成的可执行文件位于项目根目录下的 `dist/TTSClient/`。
+   > 说明：请在项目根目录执行命令，以便 PyInstaller 能够正确定位资源与模块。
+3. 首次执行会自动生成 `patvs_client.spec`，随后在 `dist/` 下输出可执行包。
 
 ## 开发者提示
 - `ui/main_window.py` 包含大量 UI 与业务绑定逻辑，建议通过 `monitoring/parser.py`、`monitoring/manager.py` 等解耦层进行扩展，避免直接依赖遗留脚本。
