@@ -30,6 +30,8 @@ class MonitoringManager(QtCore.QObject):
         if self._worker is None:
             return
         self._worker.is_running = False
+        # 立即唤醒可能正在等待动作完成的主调度线程，避免阻塞
+        self._worker.action_complete.set()
 
     def discard_session_state(self) -> None:
         """Clear any persisted monitoring progress for the active worker."""
@@ -69,6 +71,7 @@ class MonitoringManager(QtCore.QObject):
         self._thread = None
         if worker:
             worker.is_running = False
+            worker.action_complete.set()
         if thread and thread is not threading.current_thread():
             thread.join(timeout=0)
         self.monitoring_finished.emit()
