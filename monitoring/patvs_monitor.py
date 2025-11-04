@@ -204,6 +204,9 @@ class Patvs_Fuction:
                     "remaining": float(max(0.0, numeric_amount)),
                 }
             )
+        if self.normalize_action(str(action)) == "s3电源插拔":
+            normalized.setdefault("s3_progress", 0.0)
+            normalized.setdefault("power_progress", 0.0)
         return normalized
 
     def _normalize_stored_action(self, action):
@@ -228,6 +231,17 @@ class Patvs_Fuction:
                 "target": max(0.0, target),
                 "remaining": max(0.0, remaining),
             }
+            if self.normalize_action(name) == "s3电源插拔":
+                try:
+                    s3_progress = float(action.get("s3_progress", 0.0))
+                except (TypeError, ValueError):
+                    s3_progress = 0.0
+                try:
+                    power_progress = float(action.get("power_progress", 0.0))
+                except (TypeError, ValueError):
+                    power_progress = 0.0
+                normalized["s3_progress"] = max(0.0, s3_progress)
+                normalized["power_progress"] = max(0.0, power_progress)
             name_key = str(name).strip().lower()
             if (
                 normalized["unit"] == "seconds"
@@ -265,20 +279,83 @@ class Patvs_Fuction:
         return removed
 
     def _record_count_progress(self, target, completed, action_key=None):
-        if action_key is not None:
-            with self.state_lock:
-                current_name = (
-                    self.remaining_actions[0]["name"]
-                    if self.remaining_actions
-                    else None
-                )
-            if current_name is None or self.normalize_action(current_name) != action_key:
+        normalized_action_key = (
+            self.normalize_action(action_key) if action_key is not None else None
+        )
+        with self.state_lock:
+            current_name = (
+                self.remaining_actions[0]["name"]
+                if self.remaining_actions
+                else None
+            )
+        if current_name is None:
+            return
+        normalized_current = self.normalize_action(current_name)
+        if normalized_current == "s3电源插拔":
+            if normalized_action_key == "s3":
+                self._record_s3_power_progress(target, s3_completed=completed)
                 return
+            if normalized_action_key in {None, "电源插拔"}:
+                self._record_s3_power_progress(target, power_completed=completed)
+                return
+        if (
+            action_key is not None
+            and normalized_action_key is not None
+            and normalized_current != normalized_action_key
+        ):
+            return
         try:
             remaining = float(target) - float(completed)
         except (TypeError, ValueError):
             remaining = 0.0
         self._update_current_action_remaining(max(0.0, remaining))
+
+    def _record_s3_power_progress(
+        self,
+        target,
+        *,
+        s3_completed: float | None = None,
+        power_completed: float | None = None,
+    ) -> None:
+        updated = False
+        with self.state_lock:
+            if not self.remaining_actions:
+                return
+            current = self.remaining_actions[0]
+            if self.normalize_action(current.get("name", "")) != "s3电源插拔":
+                return
+            try:
+                target_total = float(target)
+            except (TypeError, ValueError):
+                target_total = float(current.get("target", 0.0) or 0.0)
+            target_total = max(0.0, target_total)
+
+            def _clamp(value, default=0.0):
+                try:
+                    return max(0.0, float(value))
+                except (TypeError, ValueError):
+                    return default
+
+            if s3_completed is not None:
+                new_s3 = _clamp(s3_completed)
+                if new_s3 != _clamp(current.get("s3_progress", 0.0)):
+                    current["s3_progress"] = new_s3
+                    updated = True
+            if power_completed is not None:
+                new_power = _clamp(power_completed)
+                if new_power != _clamp(current.get("power_progress", 0.0)):
+                    current["power_progress"] = new_power
+                    updated = True
+
+            s3_value = _clamp(current.get("s3_progress", 0.0))
+            power_value = _clamp(current.get("power_progress", 0.0))
+            combined = min(target_total, s3_value, power_value)
+            remaining = max(0.0, target_total - combined)
+            if remaining != _clamp(current.get("remaining", target_total), target_total):
+                current["remaining"] = remaining
+                updated = True
+        if updated:
+            self.save_session_state()
 
     def record_count_progress_if_current(self, target, completed, expected_keys=None):
         """更新当前动作的次数进度，避免串扰其他动作。"""
@@ -718,7 +795,11 @@ class Patvs_Fuction:
                         threading.Thread(
                             target=s3_power_cycle_monitor.run,
                             args=(self, self.case_start_time, target_value),
-                            kwargs={"remaining_cycles": remaining_value_float},
+                            kwargs={
+                                "remaining_cycles": remaining_value_float,
+                                "s3_progress": current_action.get("s3_progress"),
+                                "power_progress": current_action.get("power_progress"),
+                            },
                         ).start()
                     elif normalized_action == "显示器":
                         self.log(
