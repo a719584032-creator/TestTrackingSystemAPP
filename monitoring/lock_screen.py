@@ -59,6 +59,17 @@ class SessionNotificationHandler:
                                           0, 0, 0, None)
         win32ts.WTSRegisterSessionNotification(self.hwnd, win32ts.NOTIFY_FOR_THIS_SESSION)
 
+    def stop(self):
+        if self.hwnd:
+            try:
+                win32ts.WTSUnRegisterSessionNotification(self.hwnd)
+            except Exception as exc:  # pragma: no cover - platform interaction
+                logger.warning("注销锁屏会话通知失败: %s", exc)
+            try:
+                win32gui.PostMessage(self.hwnd, win32con.WM_CLOSE, 0, 0)
+            except Exception as exc:  # pragma: no cover - platform interaction
+                logger.warning("关闭锁屏监控窗口失败: %s", exc)
+
     def wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == WM_WTSSESSION_CHANGE:  # 使用自定义的常量
             if wparam == WTS_SESSION_LOCK:
@@ -123,4 +134,8 @@ def monitor_locks(context: "Patvs_Fuction", target_cycles, remaining_cycles=None
         )
 
     handler = SessionNotificationHandler(context, total_target, initial_count=completed)
-    handler.run()
+    context.register_message_loop_shutdown(handler.stop)
+    try:
+        handler.run()
+    finally:
+        context.register_message_loop_shutdown(None)
