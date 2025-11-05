@@ -1736,15 +1736,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 hint_text = f"{entry.device_label}"
         return device_model_id, plan_device_model_id, hint_text
 
-    def _actions_require_message_loop_stop(
-        self, actions: Sequence[MonitoringAction]
-    ) -> bool:
-        for action in actions:
-            normalized = action.name.strip().lower()
-            if "usb插拔" in normalized or "锁屏" in normalized:
-                return True
-        return False
-
     def _submit_result(self, result: str) -> None:
         if not self._current_case:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
@@ -1789,9 +1780,8 @@ class MainWindow(QtWidgets.QMainWindow):
             {k: v for k, v in payload.items() if k != "local_path"}
             for payload in dialog.attachments()
         ]
-        force_stop = result in {"fail", "blocked"} and self._actions_require_message_loop_stop(actions)
         if self._monitoring.is_running():
-            self._monitoring.stop(force_message_loop_stop=force_stop)
+            self._monitoring.stop()
             self._append_log("监控停止请求已发送")
         self._monitoring.discard_session_state()
         self._awaiting_monitor_completion_for_pass = False

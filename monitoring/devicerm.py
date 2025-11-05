@@ -77,16 +77,6 @@ class Notification:
             win32con.DEVICE_NOTIFY_WINDOW_HANDLE
         )
 
-    def stop(self):
-        if not self.hwnd:
-            return
-        try:
-            win32gui.PostMessage(self.hwnd, win32con.WM_CLOSE, 0, 0)
-        except pywintypes.error as exc:  # pragma: no cover - platform interaction
-            logger.warning("停止 USB 监控窗口失败: %s", exc)
-        except Exception as exc:  # pragma: no cover - platform interaction
-            logger.warning("停止 USB 监控窗口时出现未知异常: %s", exc)
-
     def onDeviceChange(self, hwnd, message, wparam, lparam):
         dbch = win32gui_struct.UnpackDEV_BROADCAST(lparam)
         if wparam == win32con.DBT_DEVICEREMOVECOMPLETE:
