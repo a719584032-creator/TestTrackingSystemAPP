@@ -160,12 +160,38 @@ class Patvs_Fuction:
         self.case_id: str | None = None
         self.action_complete = threading.Event()
         self.msg_loop_thread_id: int | None = None
+        self._message_loop_shutdown_lock = threading.Lock()
+        self._message_loop_shutdown: Callable[[], None] | None = None
         self.audio_log_files: list[str] = []
         self.audio_log_offsets: dict[str, int] = {}
         self.audio_event_cache: dict[str, int] = {}
         self.case_start_time: str | None = None
         self.state_lock = threading.Lock()
         self.session_reset_requested = False
+
+    # ------------------------------------------------------------------
+    def register_message_loop_shutdown(self, callback: Callable[[], None] | None) -> None:
+        """记录可用于终止当前消息循环的回调。"""
+
+        with self._message_loop_shutdown_lock:
+            self._message_loop_shutdown = callback
+
+    def request_message_loop_shutdown(self) -> bool:
+        """尝试执行已注册的消息循环终止回调。"""
+
+        with self._message_loop_shutdown_lock:
+            callback = self._message_loop_shutdown
+            self._message_loop_shutdown = None
+
+        if callback is None:
+            return False
+
+        try:
+            callback()
+        except Exception as exc:  # pragma: no cover - hardware interaction
+            self.logger.warning("终止监控消息循环时出现异常: %s", exc)
+            return False
+        return True
 
     # ------------------------------------------------------------------
     def log(self, message: str) -> None:

@@ -47,9 +47,11 @@ def run(
         )
 
     notification = Notification(context, completed, total_target)
+    context.register_message_loop_shutdown(notification.stop)
     try:
         notification.messageLoop()
     finally:
+        context.register_message_loop_shutdown(None)
         context.log("停止 USB 插拔事件监控.")
         if usb_done_event:
             usb_done_event.set()
