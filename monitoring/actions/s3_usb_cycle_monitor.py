@@ -53,7 +53,7 @@ def run(
 
     s3_thread.start()
     usb_thread.start()
-    context.msg_loop_thread_id = usb_thread.ident
+    context.register_message_loop_thread(usb_thread.ident)
 
     while not (s3_done_event.is_set() and usb_done_event.is_set()):
         time.sleep(0.5)

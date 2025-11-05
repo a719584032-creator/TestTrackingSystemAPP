@@ -10,6 +10,9 @@ import time
 from pathlib import Path
 from typing import Callable
 
+import pywintypes
+import win32api
+import win32con
 import win32evtlog
 from cryptography.fernet import Fernet
 from pynput import keyboard
@@ -177,6 +180,34 @@ class Patvs_Fuction:
         """封装 wx.CallAfter，供动作内部复用。"""
 
         wx.CallAfter(func, *args, **kwargs)
+
+    # ------------------------------------------------------------------
+    def register_message_loop_thread(self, thread_id: int | None) -> None:
+        """记录当前使用消息循环的线程。"""
+
+        with self.state_lock:
+            self.msg_loop_thread_id = thread_id
+
+    def clear_message_loop_thread(self, thread_id: int | None = None) -> None:
+        """清理消息循环线程 ID，避免后续误用。"""
+
+        with self.state_lock:
+            if thread_id is None or self.msg_loop_thread_id == thread_id:
+                self.msg_loop_thread_id = None
+
+    def stop_message_loop(self) -> None:
+        """尝试停止当前活动的 Windows 消息循环。"""
+
+        with self.state_lock:
+            thread_id = self.msg_loop_thread_id
+        if not thread_id:
+            return
+        try:
+            win32api.PostThreadMessage(thread_id, win32con.WM_QUIT, 0, 0)
+        except pywintypes.error as exc:  # pragma: no cover - system level interaction
+            self.logger.warning("无法停止消息循环线程 %s: %s", thread_id, exc)
+        finally:
+            self.clear_message_loop_thread(thread_id)
 
     # ------------------------------------------------------------------
     def _build_action_state(self, action, amount):
@@ -703,7 +734,7 @@ class Patvs_Fuction:
                             kwargs={"remaining_cycles": remaining_value_float},
                         )
                         thread.start()
-                        self.msg_loop_thread_id = thread.ident
+                        self.register_message_loop_thread(thread.ident)
                     elif normalized_action == "键盘按键":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
@@ -723,7 +754,7 @@ class Patvs_Fuction:
                             kwargs={"remaining_cycles": remaining_value_float},
                         )
                         thread.start()
-                        self.msg_loop_thread_id = thread.ident
+                        self.register_message_loop_thread(thread.ident)
                     elif normalized_action == "鼠标点击":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"

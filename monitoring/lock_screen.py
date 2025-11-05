@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # 检测电脑锁屏事件
 import ctypes
+import threading
 import win32api
 import win32con
 import win32gui
@@ -123,4 +124,8 @@ def monitor_locks(context: "Patvs_Fuction", target_cycles, remaining_cycles=None
         )
 
     handler = SessionNotificationHandler(context, total_target, initial_count=completed)
-    handler.run()
+    current_thread = threading.get_ident()
+    try:
+        handler.run()
+    finally:
+        context.clear_message_loop_thread(current_thread)
