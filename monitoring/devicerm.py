@@ -77,6 +77,30 @@ class Notification:
             win32con.DEVICE_NOTIFY_WINDOW_HANDLE
         )
 
+    def stop(self):
+        if not self.hwnd:
+            return
+        try:
+            win32gui.PostMessage(self.hwnd, win32con.WM_CLOSE, 0, 0)
+        except pywintypes.error as exc:  # pragma: no cover - platform interaction
+            logger.warning("停止 USB 监控窗口失败: %s", exc)
+        except Exception as exc:  # pragma: no cover - platform interaction
+            logger.warning("停止 USB 监控窗口时出现未知异常: %s", exc)
+        thread_id = getattr(self.context, "msg_loop_thread_id", None)
+        if thread_id:
+            try:
+                win32api.PostThreadMessage(int(thread_id), win32con.WM_QUIT, 0, 0)
+            except pywintypes.error as exc:  # pragma: no cover - platform interaction
+                logger.warning(
+                    "向 USB 监控线程 %s 发送 WM_QUIT 失败: %s", thread_id, exc
+                )
+            except Exception as exc:  # pragma: no cover - platform interaction
+                logger.warning(
+                    "向 USB 监控线程 %s 发送 WM_QUIT 时出现未知异常: %s",
+                    thread_id,
+                    exc,
+                )
+
     def onDeviceChange(self, hwnd, message, wparam, lparam):
         dbch = win32gui_struct.UnpackDEV_BROADCAST(lparam)
         if wparam == win32con.DBT_DEVICEREMOVECOMPLETE:

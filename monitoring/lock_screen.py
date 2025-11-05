@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 # 检测电脑锁屏事件
 import ctypes
+import logging
+import threading
+import uuid
+from typing import TYPE_CHECKING
+
+import pywintypes
 import win32api
 import win32con
 import win32gui
 import win32ts
-import uuid
 from PyQt5 import QtCore
-import logging
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,31 @@ class SessionNotificationHandler:
                                           0, 0, 0, 0,
                                           0, 0, 0, None)
         win32ts.WTSRegisterSessionNotification(self.hwnd, win32ts.NOTIFY_FOR_THIS_SESSION)
+
+    def stop(self):
+        if self.hwnd:
+            try:
+                win32ts.WTSUnRegisterSessionNotification(self.hwnd)
+            except Exception as exc:  # pragma: no cover - platform interaction
+                logger.warning("注销锁屏会话通知失败: %s", exc)
+            try:
+                win32gui.PostMessage(self.hwnd, win32con.WM_CLOSE, 0, 0)
+            except Exception as exc:  # pragma: no cover - platform interaction
+                logger.warning("关闭锁屏监控窗口失败: %s", exc)
+            thread_id = getattr(self.context, "msg_loop_thread_id", None)
+            if thread_id:
+                try:
+                    win32api.PostThreadMessage(int(thread_id), win32con.WM_QUIT, 0, 0)
+                except pywintypes.error as exc:  # pragma: no cover - platform interaction
+                    logger.warning(
+                        "向锁屏监控线程 %s 发送 WM_QUIT 失败: %s", thread_id, exc
+                    )
+                except Exception as exc:  # pragma: no cover - platform interaction
+                    logger.warning(
+                        "向锁屏监控线程 %s 发送 WM_QUIT 时出现未知异常: %s",
+                        thread_id,
+                        exc,
+                    )
 
     def wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == WM_WTSSESSION_CHANGE:  # 使用自定义的常量
@@ -123,4 +151,10 @@ def monitor_locks(context: "Patvs_Fuction", target_cycles, remaining_cycles=None
         )
 
     handler = SessionNotificationHandler(context, total_target, initial_count=completed)
-    handler.run()
+    context.register_message_loop_shutdown(handler.stop)
+    try:
+        handler.run()
+    finally:
+        context.register_message_loop_shutdown(None)
+        if context.msg_loop_thread_id == threading.get_ident():
+            context.msg_loop_thread_id = None

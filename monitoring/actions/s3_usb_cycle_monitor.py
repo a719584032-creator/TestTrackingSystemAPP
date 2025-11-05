@@ -61,4 +61,6 @@ def run(
     context.action_complete.set()
     s3_thread.join()
     usb_thread.join()
+    if context.msg_loop_thread_id == usb_thread.ident:
+        context.msg_loop_thread_id = None
     context.log("S3 和 USB 插拔监控已完成。")
