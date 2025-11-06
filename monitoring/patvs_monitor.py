@@ -169,6 +169,11 @@ class Patvs_Fuction:
         self.case_start_time: str | None = None
         self.state_lock = threading.Lock()
         self.session_reset_requested = False
+        self._state_persist_lock = threading.Lock()
+        self._pending_state_payload: dict[str, object] | None = None
+        self._last_state_persist = 0.0
+        self._min_state_save_interval = 5.0
+        self._last_persisted_payload: dict[str, object] | None = None
 
     # ------------------------------------------------------------------
     def log(self, message: str) -> None:
@@ -306,7 +311,7 @@ class Patvs_Fuction:
                 if remaining <= 0:
                     self.remaining_actions = self.remaining_actions[1:]
                     removed = True
-        self.save_session_state()
+        self.save_session_state(force=removed)
         return removed
 
     def _record_count_progress(self, target, completed, action_key=None):
@@ -600,7 +605,7 @@ class Patvs_Fuction:
         self.session_reset_requested = True
         self.remove_temp_file()
 
-    def save_session_state(self):
+    def save_session_state(self, force: bool = False):
         if self.session_reset_requested:
             return
         with self.state_lock:
@@ -608,15 +613,36 @@ class Patvs_Fuction:
             start_time = self.case_start_time
             case_id = self.case_id
         session_completed = not actions_snapshot
-        logger.debug("开始保存临时文件")
-        logger.debug(actions_snapshot)
         payload = {
             "case_id": case_id,
             "actions": actions_snapshot,
             "start_time": start_time,
             "completed": session_completed,
         }
-        self._persist_session_payload(payload)
+        now = time.monotonic()
+        with self._state_persist_lock:
+            if not force:
+                self._pending_state_payload = payload
+                recent_write = now - self._last_state_persist < self._min_state_save_interval
+                if recent_write and self._last_persisted_payload is not None:
+                    return
+                payload_to_write = self._pending_state_payload
+            else:
+                payload_to_write = payload
+                self._pending_state_payload = None
+
+            if (
+                not force
+                and self._last_persisted_payload is not None
+                and payload_to_write == self._last_persisted_payload
+            ):
+                return
+
+            logger.debug("开始保存临时文件")
+            logger.debug(payload_to_write.get("actions"))
+            self._persist_session_payload(payload_to_write)
+            self._last_persisted_payload = payload_to_write
+            self._last_state_persist = now
 
     @classmethod
     def remove_temp_file(cls):
@@ -920,12 +946,14 @@ class Patvs_Fuction:
                     "所有动作执行完毕，本次将保留临时文件，确保重启后仍可读取上次执行记录。"
                 )
             self.logger.warning("所有动作执行完毕，解禁按钮")
+            self.save_session_state(force=True)
             time.sleep(1)
             self.call_after(self.window.after_test)
         except Exception as e:  # pragma: no cover - 防御性捕获
             self.logger.error(f"未知错误: {e}")
+            self.save_session_state(force=True)
 
     def on_close(self, event):
-        self.save_session_state()
+        self.save_session_state(force=True)
         self.window.Destroy()
         wx.GetApp().ExitMainLoop()
