@@ -1,6 +1,7 @@
 """Qt friendly wrapper around the legacy monitoring implementation."""
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Sequence, Tuple
 
@@ -21,6 +22,9 @@ class MonitoringManager(QtCore.QObject):
         super().__init__()
         self._worker: Patvs_Fuction | None = None
         self._thread: threading.Thread | None = None
+        self._thread_done = threading.Event()
+        self._thread_join_timeout = 3.0
+        self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
     def is_running(self) -> bool:
@@ -33,6 +37,15 @@ class MonitoringManager(QtCore.QObject):
         self._worker.stop_message_loop()
         # 立即唤醒可能正在等待动作完成的主调度线程，避免阻塞
         self._worker.action_complete.set()
+
+        thread = self._thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            finished = self._thread_done.wait(timeout=self._thread_join_timeout)
+            if not finished:
+                self._logger.warning(
+                    "Monitoring thread did not exit within %.1fs. Continuing shutdown.",
+                    self._thread_join_timeout,
+                )
 
     def discard_session_state(self) -> None:
         """Clear any persisted monitoring progress for the active worker."""
@@ -61,7 +74,8 @@ class MonitoringManager(QtCore.QObject):
             finally:
                 self._stop_worker()
 
-        self._thread = threading.Thread(target=run_monitor, daemon=True)
+        self._thread_done.clear()
+        self._thread = threading.Thread(target=run_monitor, daemon=True, name="MonitoringWorker")
         self._thread.start()
 
     # ------------------------------------------------------------------
@@ -69,13 +83,26 @@ class MonitoringManager(QtCore.QObject):
         worker = self._worker
         thread = self._thread
         self._worker = None
-        self._thread = None
         if worker:
             worker.is_running = False
             worker.stop_message_loop()
             worker.action_complete.set()
-        if thread and thread is not threading.current_thread():
-            thread.join(timeout=0)
+        if thread:
+            if thread is threading.current_thread():
+                self._thread = None
+            else:
+                thread.join(timeout=self._thread_join_timeout)
+                if thread.is_alive():
+                    self._logger.warning(
+                        "Monitoring thread still alive after %.1fs timeout.",
+                        self._thread_join_timeout,
+                    )
+                    self._thread = thread
+                else:
+                    self._thread = None
+        else:
+            self._thread = None
+        self._thread_done.set()
         self.monitoring_finished.emit()
 
 
