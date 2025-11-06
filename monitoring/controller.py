@@ -85,9 +85,10 @@ class MonitoringController(QtCore.QObject):
         thread = self._thread
         self._worker = None
         self._thread = None
-        if thread:
-            thread.join(timeout=0)
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=0)  # 避免 join 当前线程
         if worker:
             worker.is_running = False
             worker.stop_message_loop()
             worker.action_complete.set()
+
