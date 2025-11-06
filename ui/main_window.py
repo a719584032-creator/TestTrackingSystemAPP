@@ -1783,7 +1783,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._monitoring.is_running():
             self._monitoring.stop()
             self._append_log("监控停止请求已发送")
-        self._monitoring.discard_session_state()
         self._awaiting_monitor_completion_for_pass = False
         try:
             self._api.submit_result(
@@ -1800,6 +1799,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "提交失败", str(exc))
             return
+        self._monitoring.discard_session_state()
         self._logger.info(
             "提交结果: 用例 %s (结果=%s, 设备=%s, 计划设备=%s)",
             self._current_case.case_id,

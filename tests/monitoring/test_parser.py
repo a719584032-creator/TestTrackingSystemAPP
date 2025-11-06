@@ -4,15 +4,17 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# Provide shims so imports work without initializing heavy modules.
 if "utils" not in sys.modules:
     utils_pkg = ModuleType("utils")
-    utils_pkg.__path__ = [str(ROOT / "utils")]
+    utils_pkg.__path__ = [str(PROJECT_ROOT / "utils")]
     sys.modules["utils"] = utils_pkg
 
 exceptions_spec = importlib.util.spec_from_file_location(
-    "utils.exceptions", ROOT / "utils" / "exceptions.py"
+    "utils.exceptions", PROJECT_ROOT / "utils" / "exceptions.py"
 )
 exceptions_module = importlib.util.module_from_spec(exceptions_spec)
 sys.modules["utils.exceptions"] = exceptions_module
@@ -20,15 +22,13 @@ exceptions_spec.loader.exec_module(exceptions_module)
 
 ValidationError = exceptions_module.ValidationError
 
-# Provide a lightweight package shim so importing monitoring.parser does not
-# trigger other heavy dependencies such as PyQt5.
 if "monitoring" not in sys.modules:
     monitoring_pkg = ModuleType("monitoring")
-    monitoring_pkg.__path__ = [str(ROOT / "monitoring")]
+    monitoring_pkg.__path__ = [str(PROJECT_ROOT / "monitoring")]
     sys.modules["monitoring"] = monitoring_pkg
 
 spec = importlib.util.spec_from_file_location(
-    "monitoring.parser", ROOT / "monitoring" / "parser.py"
+    "monitoring.parser", PROJECT_ROOT / "monitoring" / "parser.py"
 )
 parser = importlib.util.module_from_spec(spec)
 sys.modules["monitoring.parser"] = parser
