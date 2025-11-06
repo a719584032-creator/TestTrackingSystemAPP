@@ -1669,7 +1669,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._keyword_error.setVisible(False)
             self._current_actions = actions
             for action in actions:
-                self._keyword_list.addItem(f"{action.name} -> {action.amount}")
+                self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
         self._refresh_start_button_state()
         self._log_view.clear()
         if require_attachment(self._current_actions):
