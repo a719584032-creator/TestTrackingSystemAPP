@@ -91,9 +91,7 @@ class Notification:
             )
         elif wparam == win32con.DBT_DEVICEARRIVAL:
             pass
-            # self.context.log(
-            #     f"检测到 USB 设备接入: {dbch.name}，当前插拔次数: {self.cycles_count}"
-            # )
+            # 可在此输出调试日志，例如记录设备名与累计插拔次数
         if self.target_cycles and self.cycles_count >= self.target_cycles:
             self.context.record_count_progress_if_current(
                 self.target_cycles,
@@ -109,7 +107,6 @@ class Notification:
 
     def messageLoop(self):
         win32gui.PumpMessages()
-
 
 
 

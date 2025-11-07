@@ -209,7 +209,7 @@ class Patvs_Fuction:
             return
         try:
             win32api.PostThreadMessage(thread_id, win32con.WM_QUIT, 0, 0)
-        except pywintypes.error as exc:  # pragma: no cover - system level interaction
+        except pywintypes.error as exc:  # pragma: no cover - 系统级调用难以覆盖
             self.logger.warning("无法停止消息循环线程 %s: %s", thread_id, exc)
         finally:
             self.clear_message_loop_thread(thread_id)

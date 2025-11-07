@@ -25,6 +25,8 @@ class MonitoringManager(QtCore.QObject):
         self._thread_done = threading.Event()
         self._thread_join_timeout = 3.0
         self._logger = logging.getLogger(__name__)
+        # 该事件用于确保 _stop_worker 只执行一次，避免多线程重复清理
+        self._cleanup_guard = threading.Lock()
 
     # ------------------------------------------------------------------
     def is_running(self) -> bool:
@@ -33,19 +35,30 @@ class MonitoringManager(QtCore.QObject):
     def stop(self) -> None:
         if self._worker is None:
             return
-        self._worker.is_running = False
-        self._worker.stop_message_loop()
-        # 立即唤醒可能正在等待动作完成的主调度线程，避免阻塞
-        self._worker.action_complete.set()
-
+        self._signal_worker_stop()
+        # 使用事件等待后台线程自行收尾；正常情况下 run_main 会很快退出
         thread = self._thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
             finished = self._thread_done.wait(timeout=self._thread_join_timeout)
             if not finished:
                 self._logger.warning(
-                    "Monitoring thread did not exit within %.1fs. Continuing shutdown.",
+                    "Monitoring thread did not exit within %.1fs. Forcing cleanup.",
                     self._thread_join_timeout,
                 )
+                # 超时仍未退出则强制清理，防止新的监控任务无法启动
+                self._stop_worker(join_timeout=0.0)
+                self.monitoring_error.emit("监控线程退出超时，系统已强制释放监控资源")
+
+    def _signal_worker_stop(self) -> None:
+        """向遗留监控逻辑发出退出信号，解除所有 wait。"""
+
+        worker = self._worker
+        if worker is None:
+            return
+        worker.is_running = False
+        worker.stop_message_loop()
+        # 立即唤醒可能正在等待动作完成的主调度线程，避免阻塞
+        worker.action_complete.set()
 
     def discard_session_state(self) -> None:
         """Clear any persisted monitoring progress for the active worker."""
@@ -67,9 +80,10 @@ class MonitoringManager(QtCore.QObject):
         self._worker = Patvs_Fuction(window=adapter, is_running=True)
 
         def run_monitor() -> None:
+            # 使用守护线程运行遗留监控脚本，保持界面主线程顺畅
             try:
                 self._worker.run_main(case_id, legacy_actions, start_time)
-            except Exception as exc:  # pragma: no cover - hardware integration
+            except Exception as exc:  # pragma: no cover - 硬件层集成异常不易稳定复现
                 self.monitoring_error.emit(str(exc))
             finally:
                 self._stop_worker()
@@ -79,31 +93,34 @@ class MonitoringManager(QtCore.QObject):
         self._thread.start()
 
     # ------------------------------------------------------------------
-    def _stop_worker(self) -> None:
-        worker = self._worker
-        thread = self._thread
-        self._worker = None
-        if worker:
-            worker.is_running = False
-            worker.stop_message_loop()
-            worker.action_complete.set()
-        if thread:
-            if thread is threading.current_thread():
-                self._thread = None
-            else:
-                thread.join(timeout=self._thread_join_timeout)
-                if thread.is_alive():
-                    self._logger.warning(
-                        "Monitoring thread still alive after %.1fs timeout.",
-                        self._thread_join_timeout,
-                    )
-                    self._thread = thread
-                else:
-                    self._thread = None
-        else:
+    def _stop_worker(self, *, join_timeout: float | None = None) -> None:
+        # 多线程场景下可能被主线程和监控线程同时调用，通过事件保证只清理一次
+        if self._thread_done.is_set():
+            return
+        with self._cleanup_guard:
+            if self._thread_done.is_set():
+                return
+            self._signal_worker_stop()
+            worker = self._worker
+            thread = self._thread
+            self._worker = None
             self._thread = None
-        self._thread_done.set()
-        self.monitoring_finished.emit()
+
+            timeout = self._thread_join_timeout if join_timeout is None else max(join_timeout, 0.0)
+            if thread:
+                if thread is threading.current_thread():
+                    # 监控线程自己调用时不允许 join，直接交由 finally 分支退出
+                    pass
+                else:
+                    thread.join(timeout=timeout)
+                    if thread.is_alive():
+                        self._logger.warning(
+                            "Monitoring thread still alive after %.1fs timeout.",
+                            timeout,
+                        )
+            self._thread_done.set()
+            # 无论是正常结束还是强制中断，都统一向界面报告收尾完成
+            self.monitoring_finished.emit()
 
 
 class _WindowAdapter:

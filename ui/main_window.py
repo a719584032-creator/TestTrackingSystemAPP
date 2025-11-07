@@ -92,10 +92,7 @@ class ResultDialog(QtWidgets.QDialog):
         self.resize(520, 480)
 
         layout = QtWidgets.QVBoxLayout(self)
-        # header = QtWidgets.QLabel(f"当前用例：{case_title}")
-        # header.setWordWrap(True)
-        # header.setStyleSheet("font-weight: 600; font-size: 14px;")
-        # layout.addWidget(header)
+        # 若需拼接用例标题，可在此创建 QLabel 并加入布局。
 
         form = QtWidgets.QFormLayout()
         self._remark_edit = QtWidgets.QPlainTextEdit()
@@ -158,7 +155,7 @@ class ResultDialog(QtWidgets.QDialog):
         for path in files:
             try:
                 payload = encode_attachment(path)
-            except OSError as exc:  # pragma: no cover - file IO
+            except OSError as exc:  # pragma: no cover - 文件 IO 在测试环境难以稳定复现
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
             payload["local_path"] = path
@@ -188,7 +185,7 @@ class ResultDialog(QtWidgets.QDialog):
         return value or None
 
     # ------------------------------------------------------------------
-    def accept(self) -> None:  # noqa: D401 - inherited docstring
+    def accept(self) -> None:  # noqa: D401 - 继承父类文档字符串
         if self._require_attachment and not self._attachments:
             QtWidgets.QMessageBox.warning(self, "缺少附件", "请至少上传一张截图后再提交。")
             return
@@ -256,7 +253,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.setSpacing(16)
 
         # ------------------------------------------------------------------
-        # Unified filter area
+        # 统一的筛选区域
         filter_box = QtWidgets.QGroupBox("筛选")
         filter_layout = QtWidgets.QGridLayout(filter_box)
         filter_layout.setHorizontalSpacing(12)
@@ -414,7 +411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         root_layout.addWidget(splitter, stretch=1)
 
-        # Left panel: filters and case tree
+        # 左侧面板：筛选与用例树
         left_widget = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setSpacing(12)
@@ -484,7 +481,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         splitter.addWidget(left_widget)
 
-        # Right panel: case detail, monitoring
+        # 右侧面板：用例详情与监控操作
         right_widget = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setSpacing(12)
@@ -600,7 +597,7 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
 
-        # Status bar
+        # 状态栏
         status = QtWidgets.QStatusBar()
         self.setStatusBar(status)
         user_name = self._user.get("real_name") or self._user.get("username", "未登录")
@@ -758,7 +755,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 payload = json.load(state_file)
         except FileNotFoundError:
             return {}
-        except Exception as exc:  # pragma: no cover - defensive cleanup
+        except Exception as exc:  # pragma: no cover - 状态文件清理难以覆盖
             self._logger.error("读取状态文件失败: %s", exc)
             try:
                 self._state_file_path.unlink(missing_ok=True)
@@ -842,7 +839,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._state_file_path.parent.mkdir(parents=True, exist_ok=True)
             with self._state_file_path.open("w", encoding="utf-8") as state_file:
                 json.dump(state, state_file, ensure_ascii=False, indent=2)
-        except OSError as exc:  # pragma: no cover - file IO errors are non-fatal
+        except OSError as exc:  # pragma: no cover - 文件持久化失败不影响核心流程
             self._logger.warning("保存状态失败: %s", exc)
 
     # ------------------------------------------------------------------
@@ -1828,7 +1825,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._pending_filter_state = None
 
     # ------------------------------------------------------------------
-    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 - Qt 事件钩子名称固定
         self.save_state()
         geometry = self.saveGeometry()
         state = self.saveState()

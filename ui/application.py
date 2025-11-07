@@ -66,17 +66,10 @@ def main() -> int:
     window = MainWindow(api_client, monitoring, window_state, user_info)
     window.show()
 
-    # try:
-    #     update_info = updater.check()
-    # except NetworkError as exc:
-    #     logger.warning("OTA 检查失败: %s", exc)
-    # else:
-    #     if update_info:
-    #         QtWidgets.QMessageBox.information(
-    #             window,
-    #             "发现新版本",
-    #             f"检测到新版本 {update_info.version}\n{update_info.release_notes}\n请访问 OTA 服务器下载: {update_info.download_url}",
-    #         )
+    # OTA 自动更新检查示例（需要时可按照下列步骤恢复逻辑）：
+    # 1. 调用 updater.check() 获取 update_info。
+    # 2. 捕获 NetworkError，将失败原因写入日志但不中断 UI。
+    # 3. 若获取到新版本，则弹窗提示用户访问下载链接。
 
     return app.exec_()
 
