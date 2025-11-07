@@ -436,17 +436,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 8px;
                 background-color: #FFFFFF;
                 alternate-background-color: #F9FAFB;
+                 outline: none; /* 可选：取消整个TreeWidget的焦点轮廓（如果存在） */
             }
             QTreeWidget::item {
                 padding: 8px 10px;
+                 outline: none; /* 基础状态下默认无轮廓 */
             }
             QTreeWidget::item:selected {
                 background-color: #DBEAFE;
                 color: #1E3A8A;
+                outline: none; /* 选中状态下强制取消轮廓 */
             }
+
             QTreeWidget::item:hover {
                 background-color: #F3F4F6;
+                 outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
             }
+             /* 关键：针对所有item（包括子项目）的焦点状态，强制取消轮廓 */
+            QTreeWidget::item:focus,
+            QTreeWidget::item:selected:focus,
+            QTreeWidget::item:hover:focus {
+                outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
+                }
             QTreeView::branch {
                 background: transparent;
             }
