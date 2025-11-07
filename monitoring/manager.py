@@ -103,7 +103,7 @@ class MonitoringManager(QtCore.QObject):
         else:
             self._thread = None
         self._thread_done.set()
-        # self.monitoring_finished.emit()
+        self.monitoring_finished.emit()
 
 
 class _WindowAdapter:
@@ -115,5 +115,6 @@ class _WindowAdapter:
     def add_log_message(self, message: str) -> None:
         self._manager.log_generated.emit(str(message))
 
-    def after_test(self) -> None:
-        self._manager.monitoring_finished.emit()
+    # def after_test(self) -> None:
+        # self._manager.monitoring_finished.emit()
+        # pass
