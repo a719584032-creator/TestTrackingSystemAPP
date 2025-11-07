@@ -133,4 +133,5 @@ class _WindowAdapter:
         self._manager.log_generated.emit(str(message))
 
     def after_test(self) -> None:
-        self._manager.monitoring_finished.emit()
+        # self._manager.monitoring_finished.emit()
+        return

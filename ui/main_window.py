@@ -335,8 +335,8 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout = QtWidgets.QVBoxLayout()
         info_layout.setSpacing(4)
 
-        plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
-        plan_body_style = "font-size: 18px; color: #111827;"
+        plan_header_style = "font-size: 25px; font-weight: 600; color: #111827;padding-left: 5px;"
+        plan_body_style = "font-size: 25px;color: #111827;padding-left: 5px;"
 
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
         self._plan_title_label.setStyleSheet(plan_header_style)
@@ -357,6 +357,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._plan_status_label = QtWidgets.QLabel("未选择")
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
+        self._plan_status_label.setStyleSheet(
+            f"""
+          QLabel {{
+              background-color: "#374151";
+              color: #FFFFFF;
+              border: none;
+              border-radius: 14px;
+              padding: 4px 12px;
+              font-weight: 600;
+              font-size: 23px;
+          }}
+          """
+        )
         self._plan_status_label.setFixedHeight(36)
         self._plan_status_label.setMinimumWidth(96)
         self._plan_status_label.setSizePolicy(
@@ -396,7 +409,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     border-radius: 10px;
                     padding: 6px 12px;
                     font-weight: 600;
-                    font-size: 18px;
+                    font-size: 23px;
                 }}
                 """
             )
@@ -433,17 +446,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 8px;
                 background-color: #FFFFFF;
                 alternate-background-color: #F9FAFB;
+                 outline: none; /* 可选：取消整个TreeWidget的焦点轮廓（如果存在） */
             }
             QTreeWidget::item {
                 padding: 8px 10px;
+                 outline: none; /* 基础状态下默认无轮廓 */
             }
             QTreeWidget::item:selected {
                 background-color: #DBEAFE;
                 color: #1E3A8A;
+                outline: none; /* 选中状态下强制取消轮廓 */
             }
+
             QTreeWidget::item:hover {
                 background-color: #F3F4F6;
+                 outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
             }
+             /* 关键：针对所有item（包括子项目）的焦点状态，强制取消轮廓 */
+            QTreeWidget::item:focus,
+            QTreeWidget::item:selected:focus,
+            QTreeWidget::item:hover:focus {
+                outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
+                }
             QTreeView::branch {
                 background: transparent;
             }
@@ -499,7 +523,7 @@ class MainWindow(QtWidgets.QMainWindow):
         title_row.addWidget(self._title_icon_label, 0, QtCore.Qt.AlignTop)
 
         self._title_label = QtWidgets.QLabel("请选择一条用例")
-        self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self._title_label.setStyleSheet("font-size: 23px; font-weight: 600;")
         self._title_label.setWordWrap(True)
         title_row.addWidget(self._title_label, 1)
         title_row.addStretch()
@@ -614,7 +638,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 14px;
                 padding: 4px 12px;
                 font-weight: 600;
-                font-size: 18px;
+                font-size: 23px;
             }}
             """
         )
