@@ -115,6 +115,6 @@ class _WindowAdapter:
     def add_log_message(self, message: str) -> None:
         self._manager.log_generated.emit(str(message))
 
-    # def after_test(self) -> None:
+    def after_test(self) -> None:
         # self._manager.monitoring_finished.emit()
-        # pass
+        return
