@@ -12,5 +12,5 @@ def main() -> int:
     return launch()
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI entry
+if __name__ == "__main__":  # pragma: no cover - 命令行入口
     sys.exit(main())

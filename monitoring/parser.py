@@ -90,7 +90,7 @@ def _resolve_action_name(parts: Sequence[str]) -> Tuple[_ActionDefinition | None
     candidate_key = ACTION_ALIASES.get(candidate_key, candidate_key)
     definition = _ACTION_LOOKUP.get(candidate_key)
     if definition is None and len(parts) == 1:
-        # Attempt to match the single action component directly.
+        # 若用户只填写了单一动作，尝试直接匹配该组件，兼容旧格式
         fallback_key = _normalize(parts[0])
         fallback_key = ACTION_ALIASES.get(fallback_key, fallback_key)
         definition = _ACTION_LOOKUP.get(fallback_key)
@@ -123,9 +123,10 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
         action_parts = parts[:-1]
         try:
             amount = float(amount_str)
-        except ValueError:  # pragma: no cover - defensive branch
+        except ValueError:  # pragma: no cover - 防御性分支
             format_errors.append(token)
             continue
+        # 将动作部分解析成规范化定义 + 组件描述，便于界面自动勾选监控项
         definition, components = _resolve_action_name(action_parts)
         if definition is None:
             unsupported.append("+".join(action_parts))

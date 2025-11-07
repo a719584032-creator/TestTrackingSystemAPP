@@ -19,6 +19,7 @@ class ApiSettings:
 
     base_url: str = "http://10.184.46.54:5173/api"
     #base_url: str = "http://10.184.37.17:5173/api"
+
     timeout: int = 30
 
 

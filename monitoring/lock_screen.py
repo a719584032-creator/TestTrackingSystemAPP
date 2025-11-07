@@ -81,7 +81,7 @@ class SessionNotificationHandler:
                     win32gui.DestroyWindow(self.hwnd)
                     win32gui.PostQuitMessage(0)
             elif wparam == WTS_SESSION_UNLOCK:
-                #wx.CallAfter(self.window.add_log_message, "会话已解锁")
+                # 如需在解锁瞬间刷新 UI，可调用 wx.CallAfter 向窗口推送日志
                 pass
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 

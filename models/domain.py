@@ -366,7 +366,7 @@ class PlanCase:
                 continue
             if isinstance(raw, str):
                 parts = splitter.split(raw.strip())
-            else:  # pragma: no cover - defensive
+            else:  # pragma: no cover - 防御性分支
                 parts = [str(raw)]
             for part in parts:
                 part = part.strip()

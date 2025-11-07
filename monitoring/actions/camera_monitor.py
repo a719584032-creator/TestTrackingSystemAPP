@@ -50,14 +50,13 @@ def run(
     camera_indices = [0, 1, 2]
     expected_keys = {"摄像头", "camera"}
 
-    # 为每个摄像头记录上次可读状态；None 表示未知（首轮不判断跃迁）
+    # 保存每个摄像头上一次是否可读；首轮尚无记录时不判断跃迁
     last_state = {idx: None for idx in camera_indices}
-    # 全局“已开始一次开关”的标记：出现任一设备 True->False 就置 True，
-    # 出现任一设备 False->True 就完成一次周期并清零
+    # 全局标记：任一设备从可用变不可用即视为周期开始，从不可用恢复即可完成并清零
     cycle_started = False
 
     def probe(idx: int) -> bool:
-        # 读一帧判断是否可用；有的平台 isOpened 为真但读帧失败，使用 read 更稳妥
+        # 通过读取一帧判断是否可用；部分平台仅 isOpened 返回真但实际读帧失败
         cap = cv2.VideoCapture(idx)
         ret, _ = cap.read()
         cap.release()
@@ -77,12 +76,12 @@ def run(
                 last_state[idx] = cur
                 continue
 
-            # 任一设备的 True->False：标记“开始”
+            # 任一设备由可读变不可读：标记本次开关周期开始
             if (not cycle_started) and prev and (not cur):
                 cycle_started = True
                 context.log(f"[cam {idx}] 检测到被占用，开关周期开始。")
 
-            # 任一设备的 False->True：若已开始，则完成一个周期
+            # 任一设备由不可读变可读：若周期已开始则完成一次计数
             elif cycle_started and (not prev) and cur:
                 cycle_count += 1.0
                 cycle_started = False

@@ -20,7 +20,7 @@ class _WindowAdapter:
         self._signaler = signaler
         self._on_complete = on_complete
 
-    # Legacy callbacks -------------------------------------------------
+    # 遗留逻辑的回调接口 -------------------------------------------------
     def add_log_message(self, message: str) -> None:
         self._signaler.log_generated.emit(str(message))
 
@@ -67,7 +67,7 @@ class MonitoringController(QtCore.QObject):
         def run_monitor():
             try:
                 self._worker.run_main(case_id, actions, start_time)
-            except Exception as exc:  # pragma: no cover - hardware interaction
+            except Exception as exc:  # pragma: no cover - 硬件环境相关异常
                 self._event.error.emit(str(exc))
             finally:
                 self._stop_worker()
@@ -91,4 +91,3 @@ class MonitoringController(QtCore.QObject):
             worker.is_running = False
             worker.stop_message_loop()
             worker.action_complete.set()
-

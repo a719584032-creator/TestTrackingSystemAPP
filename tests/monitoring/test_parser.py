@@ -7,7 +7,7 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Provide shims so imports work without initializing heavy modules.
+# 通过注入模块桩来避免加载重量级依赖，便于单元测试运行。
 if "utils" not in sys.modules:
     utils_pkg = ModuleType("utils")
     utils_pkg.__path__ = [str(PROJECT_ROOT / "utils")]
@@ -67,5 +67,5 @@ class ParseKeywordsTests(unittest.TestCase):
         self.assertIn("不支持", str(exc_info.exception))
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover - 仅用于本地调试执行
     unittest.main()

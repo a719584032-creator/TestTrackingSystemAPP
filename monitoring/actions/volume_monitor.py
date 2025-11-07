@@ -8,9 +8,9 @@ from contextlib import suppress
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-try:  # pragma: no cover - only available on Windows
+try:  # pragma: no cover - 仅在 Windows 可用
     import pythoncom
-except ImportError:  # pragma: no cover - pywin32 not installed/non-Windows
+except ImportError:  # pragma: no cover - 非 Windows 环境或缺少 pywin32
     pythoncom = None
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -19,9 +19,9 @@ if TYPE_CHECKING:  # pragma: no cover
 
 def _open_endpoint():
     """打开并返回 (devices, volume) 两个 COM 对象，调用方负责 _close_endpoint 释放。"""
-    devices = AudioUtilities.GetSpeakers()  # IMMDevice
+    devices = AudioUtilities.GetSpeakers()  # IMMDevice 接口实例
     interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = cast(interface, POINTER(IAudioEndpointVolume))  # IAudioEndpointVolume*
+    volume = cast(interface, POINTER(IAudioEndpointVolume))  # IAudioEndpointVolume* 指针
     return devices, volume
 
 def _close_endpoint(devices, volume):

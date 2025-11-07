@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from config.settings import SETTINGS
 
-# NOTE: Keep this key in sync with ``Patvs_Fuction.ENCRYPTION_KEY``.
+# 注意：该密钥需与 ``Patvs_Fuction.ENCRYPTION_KEY`` 中的值保持一致。
 DEFAULT_ENCRYPTION_KEY = b"JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
 
 

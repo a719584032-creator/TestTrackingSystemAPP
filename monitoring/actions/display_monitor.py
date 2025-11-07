@@ -48,9 +48,9 @@ def run(
     monitor_indices = [0, 1, 2]
     expected_keys = {"显示器", "monitor", "brightness"}
 
-    # 每个显示器的上次“是否点亮”状态；None 表示未知（首轮不判断跃迁）
+    # 记录每个显示器上一次的点亮状态；首轮尚未建立基线时跳过判断
     last_state: dict[int, bool | None] = {idx: None for idx in monitor_indices}
-    # 全局：是否已经进入了一次“关→开”周期（某个显示器刚刚从 ON 变 OFF）
+    # 全局：是否已经进入了一次“关→开”周期（某个显示器刚刚从亮变暗）
     cycle_started = False
 
     def probe(idx: int) -> bool:
@@ -61,7 +61,7 @@ def run(
         """
         try:
             val = sbc.get_brightness(display=idx)
-            # library 在不同平台可能返回 int 或 [int]；做兼容处理
+            # 不同平台可能返回单个数值或列表，这里统一取第一个元素
             if isinstance(val, (list, tuple)):
                 val = val[0] if val else 0
             on = bool(val) and (int(val) > 0)
@@ -84,12 +84,12 @@ def run(
                 last_state[idx] = cur
                 continue
 
-            # 任一显示器 ON→OFF：标记一次关→开周期“开始”
+            # 任一显示器由亮转暗：标记一次关→开周期“开始”
             if (not cycle_started) and prev and (not cur):
                 cycle_started = True
                 context.log(f"[mon {idx}] 检测到关闭（ON→OFF），周期开始。")
 
-            # 任一显示器 OFF→ON：若已开始，则完成一次周期并计数
+            # 任一显示器由暗转亮：若已开始，则完成一次周期并计数
             elif cycle_started and (not prev) and cur:
                 off_on_count += 1.0
                 cycle_started = False

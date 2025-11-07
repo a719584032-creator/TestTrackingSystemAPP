@@ -25,7 +25,7 @@ class ApiClient:
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------
-    # Authentication helpers
+    # 认证相关辅助方法
     # ------------------------------------------------------------------
     def authenticate(self, username: str, password: str) -> Dict[str, any]:
         """Authenticate ``username`` using the login endpoint."""
@@ -47,7 +47,7 @@ class ApiClient:
         self._token = token
 
     # ------------------------------------------------------------------
-    # Fetch helpers
+    # 业务查询辅助方法
     # ------------------------------------------------------------------
     def get_departments(self) -> List[Department]:
         payload = self._request("GET", "/departments", params={"page": 1, "page_size": 1000})
@@ -120,7 +120,7 @@ class ApiClient:
         return self._request("POST", f"/test-plans/{plan_id}/results", json=body)
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # 内部通用工具
     # ------------------------------------------------------------------
     def _headers(self, auth_request: bool = False) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -139,13 +139,13 @@ class ApiClient:
                 json=json,
                 timeout=self.timeout,
             )
-        except requests.RequestException as exc:  # pragma: no cover - network safety net
+        except requests.RequestException as exc:  # pragma: no cover - 网络异常兜底
             logger.exception("Network error while calling %s", url)
             raise NetworkError(str(exc)) from exc
 
         try:
             payload = response.json()
-        except ValueError as exc:  # pragma: no cover - defensive
+        except ValueError as exc:  # pragma: no cover - 防御性兜底
             logger.exception("Non JSON response from %s", url)
             raise ClientError("服务器响应格式异常") from exc
 
