@@ -338,8 +338,8 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout = QtWidgets.QVBoxLayout()
         info_layout.setSpacing(4)
 
-        plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
-        plan_body_style = "font-size: 18px; color: #111827;"
+        plan_header_style = "font-size: 25px; font-weight: 600; color: #111827;padding-left: 5px;"
+        plan_body_style = "font-size: 25px;color: #111827;padding-left: 5px;"
 
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
         self._plan_title_label.setStyleSheet(plan_header_style)
@@ -360,6 +360,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._plan_status_label = QtWidgets.QLabel("未选择")
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
+        self._plan_status_label.setStyleSheet(
+            f"""
+          QLabel {{
+              background-color: "#374151";
+              color: #FFFFFF;
+              border: none;
+              border-radius: 14px;
+              padding: 4px 12px;
+              font-weight: 600;
+              font-size: 23px;
+          }}
+          """
+        )
         self._plan_status_label.setFixedHeight(36)
         self._plan_status_label.setMinimumWidth(96)
         self._plan_status_label.setSizePolicy(
@@ -399,7 +412,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     border-radius: 10px;
                     padding: 6px 12px;
                     font-weight: 600;
-                    font-size: 18px;
+                    font-size: 23px;
                 }}
                 """
             )
@@ -513,7 +526,7 @@ class MainWindow(QtWidgets.QMainWindow):
         title_row.addWidget(self._title_icon_label, 0, QtCore.Qt.AlignTop)
 
         self._title_label = QtWidgets.QLabel("请选择一条用例")
-        self._title_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self._title_label.setStyleSheet("font-size: 22px; font-weight: 600;")
         self._title_label.setWordWrap(True)
         title_row.addWidget(self._title_label, 1)
         title_row.addStretch()
@@ -628,7 +641,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 14px;
                 padding: 4px 12px;
                 font-weight: 600;
-                font-size: 18px;
+                font-size: 23px;
             }}
             """
         )
