@@ -103,7 +103,7 @@ class MonitoringManager(QtCore.QObject):
         else:
             self._thread = None
         self._thread_done.set()
-        self.monitoring_finished.emit()
+        # self.monitoring_finished.emit()
 
 
 class _WindowAdapter:
