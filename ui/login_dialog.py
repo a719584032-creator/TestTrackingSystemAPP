@@ -15,7 +15,8 @@ class LoginDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("登录 Test Tracking System")
         self.setModal(True)
-        self.setMinimumSize(420, 360)
+        # self.setMinimumSize(420, 360)
+        self.setMinimumSize(450, 550)
         self._build_ui()
 
     # ------------------------------------------------------------------
