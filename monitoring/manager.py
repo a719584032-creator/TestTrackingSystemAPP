@@ -74,7 +74,7 @@ class MonitoringManager(QtCore.QObject):
             worker.action_complete.set()
         if thread and thread is not threading.current_thread():
             thread.join(timeout=0)
-        self.monitoring_finished.emit()
+        # self.monitoring_finished.emit()
 
 
 class _WindowAdapter:

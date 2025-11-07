@@ -15,7 +15,8 @@ class LoginDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("登录 Test Tracking System")
         self.setModal(True)
-        self.setMinimumSize(420, 360)
+        self.setMinimumSize(450, 550)
+        # self.setMinimumSize(430, 380)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -83,7 +84,9 @@ class LoginDialog(QtWidgets.QDialog):
             "  padding: 12px;"
             "  border-radius: 8px;"
             "  font-weight: 600;"
+            "outline: none;"
             "}"
+            
             "QPushButton:hover { background-color: #2563eb; }"
             "QPushButton:pressed { background-color: #1d4ed8; }"
         )

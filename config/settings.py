@@ -17,7 +17,9 @@ PATVS_ROOT = get_patvs_root()
 class ApiSettings:
     """Runtime API settings used by the HTTP client."""
 
+    # base_url: str = "http://10.184.37.17:5173/api"
     base_url: str = "http://10.184.46.54:5173/api"
+    "http://10.184.46.54:5173/api"
     timeout: int = 30
 
 

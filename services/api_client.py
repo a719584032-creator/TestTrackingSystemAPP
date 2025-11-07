@@ -139,6 +139,7 @@ class ApiClient:
                 json=json,
                 timeout=self.timeout,
             )
+            # print(response.status_code)
         except requests.RequestException as exc:  # pragma: no cover - network safety net
             logger.exception("Network error while calling %s", url)
             raise NetworkError(str(exc)) from exc

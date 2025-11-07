@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtGui import QFont
 
 from models import (
     CaseExecutionResult,
@@ -72,8 +73,8 @@ class CaseDisplayEntry:
             return self.case.latest_result.lower()
         return "pending"
 
-
-class ResultDialog(QtWidgets.QDialog):
+from ui.auto_functions import AutoFunc
+class ResultDialog(QtWidgets.QDialog,AutoFunc):
     """Dialog used to collect execution metadata before submitting results."""
 
     def __init__(
@@ -124,8 +125,17 @@ class ResultDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         self._add_attachment_btn = QtWidgets.QPushButton("添加图片")
         self._remove_attachment_btn = QtWidgets.QPushButton("移除选中")
+
+        #add auto screen func
+        self._autoadd_attachment_btn = QtWidgets.QPushButton("自动添加图片")
+
+
         btn_row.addWidget(self._add_attachment_btn)
         btn_row.addWidget(self._remove_attachment_btn)
+        # add auto screen func
+        btn_row.addWidget(self._autoadd_attachment_btn)
+
+
         btn_row.addStretch()
         attachment_layout.addLayout(btn_row)
         layout.addWidget(attachment_box)
@@ -146,6 +156,8 @@ class ResultDialog(QtWidgets.QDialog):
 
         self._add_attachment_btn.clicked.connect(self._add_attachment)
         self._remove_attachment_btn.clicked.connect(self._remove_attachment)
+        # add auto screen func
+        self._autoadd_attachment_btn.clicked.connect(self.high_perf_screenshot)
 
     # ------------------------------------------------------------------
     def _add_attachment(self) -> None:
@@ -155,13 +167,14 @@ class ResultDialog(QtWidgets.QDialog):
             os.path.expanduser("~"),
             "Images (*.png *.jpg *.jpeg *.bmp)",
         )
+
         for path in files:
             try:
                 payload = encode_attachment(path)
             except OSError as exc:  # pragma: no cover - file IO
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
-            payload["local_path"] = path
+
             self._attachments.append(payload)
             self._attachment_list.addItem(os.path.basename(path))
 
@@ -320,10 +333,10 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 6px;
+                left: 12px;
+                padding: 0 8px;
                 color: #1F2937;
-                font-size: 15px;
+                font-size: 20px;
             }
             """
         )
@@ -337,8 +350,11 @@ class MainWindow(QtWidgets.QMainWindow):
         info_layout = QtWidgets.QVBoxLayout()
         info_layout.setSpacing(4)
 
+        # plan_header_style = "font-size: 28px; font-weight: 800; color: #111827;"
+        # plan_body_style = "font-size: 28px; font-weight: 800 ;color: #111827;"
+
         plan_header_style = "font-size: 18px; font-weight: 600; color: #111827;"
-        plan_body_style = "font-size: 18px; color: #111827;"
+        plan_body_style = "font-size: 18px;color: #111827;"
 
         self._plan_title_label = QtWidgets.QLabel("未选择计划")
         self._plan_title_label.setStyleSheet(plan_header_style)
@@ -349,6 +365,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_period_label.setStyleSheet(plan_body_style)
         self._plan_period_label.setWordWrap(True)
         info_layout.addWidget(self._plan_period_label)
+
 
         self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
         self._plan_tester_label.setStyleSheet(plan_body_style)
@@ -361,6 +378,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
         self._plan_status_label.setFixedHeight(36)
         self._plan_status_label.setMinimumWidth(96)
+
         self._plan_status_label.setSizePolicy(
             QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed
         )
@@ -435,17 +453,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 border-radius: 8px;
                 background-color: #FFFFFF;
                 alternate-background-color: #F9FAFB;
+                 outline: none; /* 可选：取消整个TreeWidget的焦点轮廓（如果存在） */
             }
             QTreeWidget::item {
                 padding: 8px 10px;
+                 outline: none; /* 基础状态下默认无轮廓 */
             }
             QTreeWidget::item:selected {
                 background-color: #DBEAFE;
                 color: #1E3A8A;
+                outline: none; /* 选中状态下强制取消轮廓 */
             }
+    
             QTreeWidget::item:hover {
                 background-color: #F3F4F6;
+                 outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
             }
+             /* 关键：针对所有item（包括子项目）的焦点状态，强制取消轮廓 */
+            QTreeWidget::item:focus,
+            QTreeWidget::item:selected:focus,
+            QTreeWidget::item:hover:focus {
+                outline: none; /* 无论焦点与其他状态如何组合，均无轮廓 */
+                }
             QTreeView::branch {
                 background: transparent;
             }
@@ -583,9 +612,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pass_btn = QtWidgets.QPushButton("标记通过")
         self._fail_btn = QtWidgets.QPushButton("标记失败")
         self._block_btn = QtWidgets.QPushButton("标记阻塞")
+
         self._style_action_button(self._pass_btn, "#10B981")
         self._style_action_button(self._fail_btn, "#EF4444")
         self._style_action_button(self._block_btn, "#F59E0B")
+
         action_layout.addWidget(self._pass_btn)
         action_layout.addWidget(self._fail_btn)
         action_layout.addWidget(self._block_btn)

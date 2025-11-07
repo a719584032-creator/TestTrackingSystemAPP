@@ -34,6 +34,8 @@ from .actions import (
     time_monitor,
     usb_monitor,
     volume_monitor,
+    xiaotian_monitor,
+    mouse_report_rate_monitir,
 )
 from config.settings import SETTINGS
 
@@ -591,6 +593,7 @@ class Patvs_Fuction:
                     remaining_value_float = float(remaining_value)
                 except (TypeError, ValueError):
                     remaining_value_float = target_value_float
+
                 if self.is_running:
                     display_action = action
                     normalized_action = self.normalize_action(action)
@@ -600,22 +603,27 @@ class Patvs_Fuction:
                     if "时间" in normalized_action or normalized_action == "time":
                         total_minutes = target_value / 60 if target_value else 0
                         remaining_minutes = remaining_value / 60 if remaining_value else 0
+
                         self.log(
                             f"开始执行监控时间，目标测试时间: {total_minutes:g} min，剩余 {remaining_minutes:g} min"
                         )
+
                         threading.Thread(
                             target=time_monitor.run,
                             args=(self, remaining_value, target_value),
                         ).start()
+
                     elif normalized_action == "电源插拔":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
                         )
+
                         threading.Thread(
                             target=power_plug_monitor.run,
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
                     elif normalized_action.lower() == "usb插拔":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
@@ -627,15 +635,18 @@ class Patvs_Fuction:
                         )
                         thread.start()
                         self.msg_loop_thread_id = thread.ident
+
                     elif normalized_action == "键盘按键":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
                         )
+
                         threading.Thread(
                             target=keyboard_any_monitor.run,
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
                     elif normalized_action == "锁屏":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
@@ -711,6 +722,7 @@ class Patvs_Fuction:
                             ),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
                     elif normalized_action == "s3电源插拔":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
@@ -720,6 +732,8 @@ class Patvs_Fuction:
                             args=(self, self.case_start_time, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
+
                     elif normalized_action == "显示器":
                         self.log(
                             f"开始执行监控: {action} 开关事件，目标测试次数: {target_value:g}"
@@ -747,6 +761,7 @@ class Patvs_Fuction:
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
                     elif normalized_action in AUDIO_EVENT_KEYWORDS:
                         self.log(
                             f"开始执行监控音频事件: {display_action}，目标测试次数: {int(target_value)}"
@@ -755,9 +770,27 @@ class Patvs_Fuction:
                             target=audio_event_monitor.run,
                             args=(self, normalized_action, target_value, display_action),
                         ).start()
+
+
+                    elif normalized_action in {"联想小天", "xiaotian"}:
+
+                        self.log(
+                            f"开始执行监控: {action}，目标测试次数: {target_value:g}"
+                        )
+                        threading.Thread(
+                            target=xiaotian_monitor.run,
+                            args=(self, self.case_start_time, target_value),
+                            kwargs={"remaining_cycles": remaining_value_float},
+                        ).start()
+
+                    elif "回报率检测" in normalized_action :
+                        pass
+
                     else:
                         self.log(f"未匹配到任何监控事项，请检查 {action} 填写是否正确")
                         self.action_complete.set()
+
+
 
                     self.action_complete.wait()
                     remaining_after = 0.0
