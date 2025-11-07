@@ -133,5 +133,5 @@ class _WindowAdapter:
         self._manager.log_generated.emit(str(message))
 
     def after_test(self) -> None:
-        # self._manager.monitoring_finished.emit()
+        # 统一由 MonitoringManager._stop_worker 触发监控完成事件，避免重复通知
         return
