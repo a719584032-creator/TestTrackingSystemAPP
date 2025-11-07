@@ -526,7 +526,7 @@ class MainWindow(QtWidgets.QMainWindow):
         title_row.addWidget(self._title_icon_label, 0, QtCore.Qt.AlignTop)
 
         self._title_label = QtWidgets.QLabel("请选择一条用例")
-        self._title_label.setStyleSheet("font-size: 22px; font-weight: 600;")
+        self._title_label.setStyleSheet("font-size: 23px; font-weight: 600;")
         self._title_label.setWordWrap(True)
         title_row.addWidget(self._title_label, 1)
         title_row.addStretch()
