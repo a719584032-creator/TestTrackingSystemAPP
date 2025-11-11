@@ -1,4 +1,4 @@
-"""Convenience launcher for running the desktop client directly."""
+""" 项目运行入口 """
 from __future__ import annotations
 
 import sys
@@ -7,7 +7,7 @@ from ui.application import main as launch
 
 
 def main() -> int:
-    """Launch the UI application and return its exit code."""
+    """启动 UI 程序"""
 
     return launch()
 

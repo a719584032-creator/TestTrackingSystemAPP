@@ -1,4 +1,4 @@
-"""Helper utilities for packaging the client with PyInstaller."""
+"""PyInstaller 打包工具"""
 from __future__ import annotations
 
 import os
@@ -13,12 +13,8 @@ DIST_DIR = ROOT / "dist"
 
 
 def _collect_hidden_imports(packages: list[str]) -> list[str]:
-    """Return a list of all modules that should be force-imported.
-
-    PyInstaller struggles to discover dynamically imported modules inside our
-    package namespaces (``ui``, ``services`` …).  Walking the package tree and
-    feeding the discovered modules as ``--hidden-import`` arguments guarantees
-    they are bundled inside the executable.
+    """
+    获取项目所有依赖包
     """
 
     hidden: set[str] = set()
@@ -44,7 +40,7 @@ def _collect_data_directories(directories: list[str]) -> list[tuple[str, str]]:
 
 
 def build_executable(output_dir: str = "dist") -> None:
-    """Build the standalone executable using the current project layout."""
+    """打包"""
 
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     DIST_DIR.mkdir(parents=True, exist_ok=True)

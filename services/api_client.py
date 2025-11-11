@@ -4,13 +4,14 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import requests
 
 from config.settings import SETTINGS
 from models import Department, PlanCase, PlanDetail, Project, TestPlan
 from utils.exceptions import AuthenticationError, ClientError, NetworkError
+from utils.security import encode_timestamp_token
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,11 @@ class ApiClient:
     """Simple wrapper around the REST endpoints exposed by TTS."""
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[int] = None):
-        settings = SETTINGS.api
+        client_settings = SETTINGS
+        settings = client_settings.api
         self.base_url = base_url or settings.base_url.rstrip("/")
         self.timeout = timeout or settings.timeout
+        self._time_secret = client_settings.crypto.result_time_secret
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -94,9 +97,12 @@ class ApiClient:
         device_model_id: int | None = None,
         plan_device_model_id: int | None = None,
         attachments: Optional[Iterable[Dict[str, str]]] = None,
-        execution_start_time: Optional[str] = None,
-        execution_end_time: Optional[str] = None,
+        *,
+        execution_start_time: str,
+        execution_end_time: str,
     ) -> Dict[str, any]:
+        if not execution_start_time or not execution_end_time:
+            raise ValueError("执行结果开始/结束时间不能为空")
         body: Dict[str, any] = {
             "plan_case_id": plan_case_id,
             "result": result,
@@ -112,12 +118,70 @@ class ApiClient:
             body["plan_device_model_id"] = plan_device_model_id
         if attachments:
             body["attachments"] = list(attachments)
-        if execution_start_time:
-            body["execution_start_time"] = execution_start_time
-        if execution_end_time:
-            body["execution_end_time"] = execution_end_time
+        encrypted_start = self._encrypt_time_value(execution_start_time)
+        encrypted_end = self._encrypt_time_value(execution_end_time)
+        body["execution_start_time"] = encrypted_start
+        body["execution_end_time"] = encrypted_end
+        time_parameters: List[Tuple[str, str, str]] = [
+            ("execution_start_time", execution_start_time, encrypted_start),
+            ("execution_end_time", execution_end_time, encrypted_end),
+        ]
 
-        return self._request("POST", f"/test-plans/{plan_id}/results", json=body)
+        self._log_time_parameters(time_parameters)
+        logger.info(
+            "提交结果请求参数(plan_id=%s, plan_case_id=%s): %s",
+            plan_id,
+            plan_case_id,
+            self._submission_payload_for_logging(body),
+        )
+        response = self._request("POST", f"/test-plans/{plan_id}/results", json=body)
+        logger.info(
+            "提交结果响应(plan_id=%s, plan_case_id=%s): %s",
+            plan_id,
+            plan_case_id,
+            response,
+        )
+        return response
+
+    # ------------------------------------------------------------------
+    def _submission_payload_for_logging(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key == "attachments" and value:
+                sanitized[key] = self._attachment_log_summary(value)
+            else:
+                sanitized[key] = value
+        return sanitized
+
+    def _log_time_parameters(
+        self, params: Sequence[Tuple[str, str, str]]
+    ) -> None:
+        for field, raw_value, encrypted_value in params:
+            logger.info(
+                "时间参数 %s: 原始=%s, 加密=%s",
+                field,
+                raw_value,
+                encrypted_value,
+            )
+
+    @staticmethod
+    def _attachment_log_summary(attachments: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        summary: List[Dict[str, Any]] = []
+        for attachment in attachments:
+            summary.append(
+                {
+                    "file_name": attachment.get("file_name"),
+                    "size": attachment.get("size"),
+                }
+            )
+        return summary
+
+    def _encrypt_time_value(self, value: str) -> str:
+        if not value:
+            raise ValueError("执行结果时间不能为空")
+        if not self._time_secret:
+            raise ValueError("提交结果密钥未配置，请联系管理员")
+        return encode_timestamp_token(value, self._time_secret)
 
     # ------------------------------------------------------------------
     # 内部通用工具

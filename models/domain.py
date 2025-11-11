@@ -1,4 +1,4 @@
-"""Data models that mirror server side payloads."""
+"""服务端数据模型请求"""
 from __future__ import annotations
 
 import re
@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(slots=True)
 class Department:
-    """Represents a testing department."""
+    """获取部门信息"""
 
     id: int
     name: str
@@ -29,7 +29,7 @@ class Department:
 
 @dataclass(slots=True)
 class Project:
-    """Represents a project under a department."""
+    """获取部门项目信息"""
 
     id: int
     name: str
@@ -48,7 +48,7 @@ class Project:
 
 @dataclass(slots=True)
 class DeviceModel:
-    """Represents a device model associated with a test plan."""
+    """获取部门机型"""
 
     id: int
     name: str
@@ -70,7 +70,7 @@ class DeviceModel:
 
 @dataclass(slots=True)
 class TestPlan:
-    """Lightweight representation of a test plan."""
+    """获取测试计划"""
 
     id: int
     name: str
@@ -89,7 +89,7 @@ class TestPlan:
 
 @dataclass(slots=True)
 class PlanStatistics:
-    """Aggregated execution statistics for a test plan."""
+    """测试计划进度详情"""
 
     total_results: int
     executed_results: int
@@ -114,7 +114,7 @@ class PlanStatistics:
 
 @dataclass(slots=True)
 class PlanTester:
-    """Tester assigned to a plan."""
+    """测试计划测试人员"""
 
     id: int
     name: str
@@ -138,7 +138,7 @@ class PlanTester:
 
 @dataclass(slots=True)
 class PlanExecutionRun:
-    """Execution summary for a single run of a plan."""
+    """测试计划执行记录详情"""
 
     id: int
     name: str
@@ -222,7 +222,7 @@ class PlanDetail:
 
 @dataclass(slots=True)
 class CaseExecutionResult:
-    """Represents a single execution run for a plan case."""
+    """记录用例结果"""
 
     id: Optional[int]
     plan_case_id: Optional[int]
@@ -281,7 +281,7 @@ class CaseExecutionResult:
 
 @dataclass(slots=True)
 class CaseStep:
-    """Represents a single step within a plan case."""
+    """计划用例步骤"""
 
     no: Optional[int]
     action: Optional[str]

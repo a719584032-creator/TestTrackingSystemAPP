@@ -60,6 +60,18 @@ class ParseKeywordsTests(unittest.TestCase):
         self.assertEqual(action.amount, 3.0)
         self.assertEqual(action.display_label(), "S3 插拔 (S3 睡眠 + USB 插拔)")
 
+    def test_audio_action_uses_event_definition(self):
+        actions = parse_keywords(["HEADSET_POWER_ON+5"])
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.name, "HEADSET_POWER_ON")
+        self.assertEqual(action.amount, 5.0)
+        self.assertEqual(action.normalized_name, "headset_power_on")
+        label = action.display_label()
+        self.assertIn("HEADSET_POWER_ON", label)
+        self.assertIn("耳机拨动开机", label)
+
     def test_unsupported_action_raises_validation_error(self):
         with self.assertRaises(ValidationError) as exc_info:
             parse_keywords(["Unknown+2"])

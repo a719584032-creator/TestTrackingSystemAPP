@@ -1,6 +1,7 @@
-"""Configuration helpers for the TTS desktop client."""
+"""TTS 配置管理"""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,7 @@ PATVS_ROOT = get_patvs_root()
 
 @dataclass(slots=True)
 class ApiSettings:
-    """Runtime API settings used by the HTTP client."""
+    """API 设置"""
 
     base_url: str = "http://10.184.46.54:5173/api"
     #base_url: str = "http://10.184.37.17:5173/api"
@@ -25,7 +26,7 @@ class ApiSettings:
 
 @dataclass(slots=True)
 class OTASettings:
-    """Settings that describe the OTA update channel."""
+    """OTA 升级 URL设置"""
 
     manifest_url: str = "https://ota.example.com/tts/manifest.json"
     download_dir: Path = CONFIG_DIR / "downloads"
@@ -35,11 +36,19 @@ class OTASettings:
 
 
 @dataclass(slots=True)
+class CryptoSettings:
+    """时间加密 key，与后端对应"""
+
+    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")
+
+
+@dataclass(slots=True)
 class ClientSettings:
-    """Aggregate configuration object for the desktop client."""
+    """临时存储，客户端回放等文件"""
 
     api: ApiSettings = ApiSettings()
     ota: OTASettings = OTASettings()
+    crypto: CryptoSettings = CryptoSettings()
     remember_me_file: Path = PATVS_ROOT / "credentials.json"
     ui_state_file: Path = CONFIG_DIR / "ui_state.json"
     window_state_file: Path = CONFIG_DIR / "window_state.json"

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Auto-generated constants for PATVS event log monitoring.
-Each event code maps to a spec with keywords and a human-readable description.
+Audio 监控项常量
 """
 from typing import Dict, List, Optional, TypedDict
 
