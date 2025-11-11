@@ -431,14 +431,69 @@ class Patvs_Fuction:
         self._update_current_action_remaining(remaining)
 
     def update_audio_log_files(self, files):
-        self.audio_log_files = list(dict.fromkeys(files))
+        unique: list[str] = []
+        seen: set[str] = set()
+        for path in files or []:
+            if path is None:
+                continue
+            normalized = str(path)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            unique.append(normalized)
+        with self.state_lock:
+            self.audio_log_files = unique
 
-    def initialize_audio_monitor_state(self, offsets=None):
-        self.audio_log_offsets = {}
+    def initialize_audio_monitor_state(self, offsets=None, cache=None):
+        normalized_offsets: dict[str, int] = {}
         if offsets:
             for path, position in offsets.items():
-                self.audio_log_offsets[path] = position
-        self.audio_event_cache = {}
+                try:
+                    normalized_offsets[str(path)] = max(0, int(position))
+                except (TypeError, ValueError):
+                    continue
+        normalized_cache: dict[str, int] = {}
+        if cache:
+            for key, value in cache.items():
+                normalized_key = self.normalize_action(key)
+                try:
+                    normalized_cache[normalized_key] = max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+        with self.state_lock:
+            self.audio_log_offsets = normalized_offsets
+            self.audio_event_cache = normalized_cache
+
+    def get_audio_log_files(self) -> list[str]:
+        with self.state_lock:
+            return list(self.audio_log_files)
+
+    def get_audio_log_offset(self, path: str) -> int | None:
+        with self.state_lock:
+            return self.audio_log_offsets.get(path)
+
+    def update_audio_log_offset(self, path: str, position: int) -> None:
+        with self.state_lock:
+            self.audio_log_offsets[path] = max(0, int(position))
+
+    def get_audio_event_count(self, action_key: str) -> int:
+        normalized = self.normalize_action(action_key)
+        with self.state_lock:
+            return self.audio_event_cache.get(normalized, 0)
+
+    def increment_audio_event_count(self, action_key: str) -> int:
+        normalized = self.normalize_action(action_key)
+        with self.state_lock:
+            new_value = self.audio_event_cache.get(normalized, 0) + 1
+            self.audio_event_cache[normalized] = new_value
+            return new_value
+
+    def snapshot_audio_monitor_state(self) -> dict[str, object]:
+        with self.state_lock:
+            files = list(self.audio_log_files)
+            offsets = {path: int(position) for path, position in self.audio_log_offsets.items()}
+            cache = dict(self.audio_event_cache)
+        return {"files": files, "offsets": offsets, "cache": cache}
 
     def _normalize_start_time(self, start_time):
         if isinstance(start_time, datetime.datetime):
@@ -584,7 +639,7 @@ class Patvs_Fuction:
         if not data or data.get("case_id") != self.case_id:
             if restored_from_cache and data and data.get("case_id") != self.case_id:
                 self.logger.warning("备份缓存中的监控状态与当前用例不匹配，已忽略。")
-            return [], None, False
+            return [], None, False, None
 
         if restored_from_cache:
             self._persist_session_payload(data)
@@ -595,9 +650,12 @@ class Patvs_Fuction:
             if normalized:
                 normalized_actions.append(normalized)
         completed = bool(data.get("completed"))
+        audio_state = data.get("audio_state")
+        if not isinstance(audio_state, dict):
+            audio_state = None
         if completed and not normalized_actions:
-            return [], None, True
-        return normalized_actions, data.get("start_time"), completed
+            return [], None, True, audio_state
+        return normalized_actions, data.get("start_time"), completed, audio_state
 
     def request_session_reset(self):
         """Mark the current session as invalid so it will not resume next time."""
@@ -619,6 +677,9 @@ class Patvs_Fuction:
             "start_time": start_time,
             "completed": session_completed,
         }
+        audio_state = self.snapshot_audio_monitor_state()
+        if any(audio_state.values()):
+            payload["audio_state"] = audio_state
         now = time.monotonic()
         with self._state_persist_lock:
             if not force:
@@ -658,7 +719,27 @@ class Patvs_Fuction:
     def run_main(self, case_id, action_and_num, start_time):
         try:
             self.case_id = case_id
-            stored_actions, stored_start_time, session_completed = self.load_session_state()
+            (
+                stored_actions,
+                stored_start_time,
+                session_completed,
+                stored_audio_state,
+            ) = self.load_session_state()
+            if stored_actions and stored_audio_state:
+                self.update_audio_log_files(stored_audio_state.get("files"))
+                self.initialize_audio_monitor_state(
+                    offsets=stored_audio_state.get("offsets"),
+                    cache=stored_audio_state.get("cache"),
+                )
+            else:
+                self.initialize_audio_monitor_state()
+                current_files = self.get_audio_log_files()
+                if (
+                    not current_files
+                    and stored_audio_state
+                    and stored_audio_state.get("files")
+                ):
+                    self.update_audio_log_files(stored_audio_state.get("files"))
             if stored_actions:
                 self.remaining_actions = stored_actions
                 case_start_time = stored_start_time or start_time

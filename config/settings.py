@@ -1,6 +1,7 @@
 """Configuration helpers for the TTS desktop client."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,11 +36,19 @@ class OTASettings:
 
 
 @dataclass(slots=True)
+class CryptoSettings:
+    """Symmetric encryption settings shared across the client."""
+
+    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")
+
+
+@dataclass(slots=True)
 class ClientSettings:
     """Aggregate configuration object for the desktop client."""
 
     api: ApiSettings = ApiSettings()
     ota: OTASettings = OTASettings()
+    crypto: CryptoSettings = CryptoSettings()
     remember_me_file: Path = PATVS_ROOT / "credentials.json"
     ui_state_file: Path = CONFIG_DIR / "ui_state.json"
     window_state_file: Path = CONFIG_DIR / "window_state.json"

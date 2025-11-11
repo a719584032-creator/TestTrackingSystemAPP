@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Sequence, Tuple
 
 from utils.exceptions import ValidationError
+from .audio_event_constants import EVENT_SPECS
 
 
 def _normalize(value: str) -> str:
@@ -32,8 +33,16 @@ class MonitoringAction:
     def display_label(self) -> str:
         """Return a human friendly label including component breakdown."""
 
-        if self.components and len(self.components) > 1:
-            return f"{self.name} ({' + '.join(self.components)})"
+        if self.components:
+            components = tuple(part for part in self.components if part)
+            if not components:
+                return self.name
+            if len(components) == 1:
+                single = components[0]
+                if single and single.lower() != self.name.lower():
+                    return f"{self.name} ({single})"
+            else:
+                return f"{self.name} ({' + '.join(components)})"
         return self.name
 
 
@@ -72,6 +81,12 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
 )
 
 _ACTION_LOOKUP = {_normalize(defn.name): defn for defn in _ACTION_DEFINITIONS}
+_AUDIO_ACTION_LOOKUP = {}
+for _name, _spec in EVENT_SPECS.items():
+    normalized = _normalize(_name)
+    description = (_spec.get("description") or "").strip()
+    components: Tuple[str, ...] = (description,) if description else ()
+    _AUDIO_ACTION_LOOKUP[normalized] = _ActionDefinition(_name, components=components)
 
 ACTION_ALIASES = {
     _normalize("s3+usb"): _normalize("S3 插拔"),
@@ -96,6 +111,16 @@ def _resolve_action_name(parts: Sequence[str]) -> Tuple[_ActionDefinition | None
         definition = _ACTION_LOOKUP.get(fallback_key)
     if definition is None:
         return None, tuple(parts)
+    return definition, definition.describe(parts)
+
+
+def _resolve_audio_action(parts: Sequence[str]) -> Tuple[_ActionDefinition | None, Tuple[str, ...]]:
+    if len(parts) != 1:
+        return None, ()
+    key = _normalize(parts[0])
+    definition = _AUDIO_ACTION_LOOKUP.get(key)
+    if definition is None:
+        return None, ()
     return definition, definition.describe(parts)
 
 
@@ -128,6 +153,8 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
             continue
         # 将动作部分解析成规范化定义 + 组件描述，便于界面自动勾选监控项
         definition, components = _resolve_action_name(action_parts)
+        if definition is None:
+            definition, components = _resolve_audio_action(action_parts)
         if definition is None:
             unsupported.append("+".join(action_parts))
             continue

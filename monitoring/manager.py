@@ -69,7 +69,14 @@ class MonitoringManager(QtCore.QObject):
         else:
             Patvs_Fuction.remove_temp_file()
 
-    def start(self, case_id: int, actions: Sequence[MonitoringAction], start_time: str) -> None:
+    def start(
+        self,
+        case_id: int,
+        actions: Sequence[MonitoringAction],
+        start_time: str,
+        *,
+        audio_log_files: Sequence[str] | None = None,
+    ) -> None:
         if self.is_running():
             self.monitoring_error.emit("已有监控任务正在执行，请先停止当前任务")
             return
@@ -78,6 +85,8 @@ class MonitoringManager(QtCore.QObject):
 
         adapter = _WindowAdapter(self)
         self._worker = Patvs_Fuction(window=adapter, is_running=True)
+        if audio_log_files:
+            self._worker.update_audio_log_files(audio_log_files)
 
         def run_monitor() -> None:
             # 使用守护线程运行遗留监控脚本，保持界面主线程顺畅

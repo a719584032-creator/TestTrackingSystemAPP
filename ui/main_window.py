@@ -18,6 +18,7 @@ from models import (
     Project,
     TestPlan,
 )
+from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
 from monitoring.parser import MonitoringAction, parse_keywords, require_attachment
 from services.api_client import ApiClient, encode_attachment
@@ -226,6 +227,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pending_filter_state: Optional[Dict[str, object]] = None
         self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
         self._auto_start_in_progress = False
+        self._case_execution_start_times: Dict[int, str] = {}
+        self._audio_log_files: List[str] = []
+        self._pending_audio_logs: Optional[List[str]] = None
+        self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
 
         self._state_file_path = SETTINGS.ui_state_file
         self._restore_department_id: Optional[int] = None
@@ -238,6 +243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1200, 680)
         self.setMinimumSize(1024, 640)
         self._build_ui()
+        self._apply_pending_audio_logs()
         self._connect_signals()
         self._restore_window_state()
 
@@ -569,6 +575,19 @@ class MainWindow(QtWidgets.QMainWindow):
         monitor_layout = QtWidgets.QVBoxLayout(monitor_box)
         monitor_layout.setSpacing(12)
 
+        audio_row = QtWidgets.QHBoxLayout()
+        audio_row.setSpacing(8)
+        audio_row.addWidget(QtWidgets.QLabel("Lab Audio 日志:"), 0, QtCore.Qt.AlignVCenter)
+        self._audio_log_status = QtWidgets.QLabel("未选择")
+        self._audio_log_status.setStyleSheet("color: #6B7280;")
+        self._audio_log_status.setWordWrap(True)
+        audio_row.addWidget(self._audio_log_status, 1)
+        self._select_audio_logs_btn = QtWidgets.QPushButton("选择日志")
+        self._clear_audio_logs_btn = QtWidgets.QPushButton("清除")
+        audio_row.addWidget(self._select_audio_logs_btn)
+        audio_row.addWidget(self._clear_audio_logs_btn)
+        monitor_layout.addLayout(audio_row)
+
         self._start_monitor_btn = QtWidgets.QPushButton("开始执行")
 
         monitor_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -721,6 +740,70 @@ class MainWindow(QtWidgets.QMainWindow):
         self._case_tree.setDisabled(locked)
         self._refresh_start_button_state()
 
+    def _apply_pending_audio_logs(self) -> None:
+        if self._pending_audio_logs is not None:
+            self._set_audio_log_files(self._pending_audio_logs)
+            self._pending_audio_logs = None
+        else:
+            self._update_audio_log_hint()
+
+    def _set_audio_log_files(self, files: Sequence[str]) -> None:
+        deduped: List[str] = []
+        seen: set[str] = set()
+        for path in files or []:
+            if path is None:
+                continue
+            normalized = os.path.abspath(str(path))
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        self._audio_log_files = deduped
+        if deduped:
+            directory = os.path.dirname(deduped[-1])
+            if directory:
+                self._audio_log_dir_hint = directory
+        self._update_audio_log_hint()
+
+    def _update_audio_log_hint(self) -> None:
+        label = getattr(self, "_audio_log_status", None)
+        if label is None:
+            return
+        if not self._audio_log_files:
+            label.setText("未选择")
+            label.setStyleSheet("color: #6B7280;")
+            label.setToolTip("")
+            return
+        if len(self._audio_log_files) == 1:
+            path = self._audio_log_files[0]
+            label.setText(os.path.basename(path) or path)
+            label.setStyleSheet("color: #111827;")
+            label.setToolTip(path)
+        else:
+            display_text = " | ".join(self._audio_log_files)
+            label.setText(display_text)
+            label.setStyleSheet("color: #111827;")
+            label.setToolTip(display_text)
+
+    def _select_audio_logs(self) -> None:
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "选择 Lab Audio 日志文件",
+            self._audio_log_dir_hint,
+            "Log files (*.log *.txt);;All files (*)",
+        )
+        if not files:
+            return
+        self._set_audio_log_files(files)
+        self.save_state()
+
+    def _clear_audio_logs(self) -> None:
+        if not self._audio_log_files:
+            return
+        self._audio_log_files = []
+        self._update_audio_log_hint()
+        self.save_state()
+
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
         # 使用整数重载，避免 PyQt 选择字符串信号导致比较时报错
@@ -735,6 +818,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._case_tree.currentItemChanged.connect(self._on_case_selected)
 
         self._start_monitor_btn.clicked.connect(self._start_monitoring)
+        self._select_audio_logs_btn.clicked.connect(self._select_audio_logs)
+        self._clear_audio_logs_btn.clicked.connect(self._clear_audio_logs)
 
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
@@ -801,6 +886,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._restore_project_id = None
             self._restore_plan_id = None
             self._restore_start_clicked = False
+            self._pending_audio_logs = None
             return
 
         self._restore_department_id = self._int_or_none(state.get("department_id"))
@@ -837,6 +923,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._restore_start_clicked = bool(state.get("start_clicked"))
 
+        audio_logs = state.get("audio_logs")
+        if isinstance(audio_logs, list):
+            self._pending_audio_logs = [str(path) for path in audio_logs if path]
+        else:
+            self._pending_audio_logs = None
+
     def save_state(self) -> None:
         username = self._state_username()
         if not username:
@@ -854,6 +946,7 @@ class MainWindow(QtWidgets.QMainWindow):
             },
             "start_clicked": bool(self._monitoring.is_running() or self._execution_locked),
         }
+        state["audio_logs"] = list(self._audio_log_files)
 
         selection = self._selection_key(self._current_entry)
         if selection:
@@ -1699,6 +1792,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self._attachment_hint.clear()
 
     # ------------------------------------------------------------------
+    def _requires_audio_logs(self) -> bool:
+        for action in self._current_actions:
+            if action.normalized_name in AUDIO_EVENT_KEYWORDS:
+                return True
+        return False
+
+    # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
         try:
             if not self._current_case:
@@ -1720,8 +1820,23 @@ class MainWindow(QtWidgets.QMainWindow):
                     if confirm != QtWidgets.QMessageBox.Yes:
                         return
             self._awaiting_monitor_completion_for_pass = bool(self._current_actions)
-            start_time = dt.datetime.now().isoformat()
-            self._monitoring.start(self._current_case.case_id, self._current_actions, start_time)
+            start_time = dt.datetime.now(dt.timezone.utc).isoformat()
+            if self._current_case and self._current_case.id:
+                self._case_execution_start_times[int(self._current_case.id)] = start_time
+            require_audio_logs = self._requires_audio_logs()
+            if require_audio_logs and not self._audio_log_files:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "缺少日志文件",
+                    "该用例包含 Lab Audio 监控，请先选择至少一个串口日志文件。",
+                )
+                return
+            self._monitoring.start(
+                self._current_case.case_id,
+                self._current_actions,
+                start_time,
+                audio_log_files=self._audio_log_files if require_audio_logs else None,
+            )
             self._append_log("监控已启动")
             self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
             self._set_action_buttons_mode(True)
@@ -1794,6 +1909,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if plan_id is None or plan_case_id is None:
             QtWidgets.QMessageBox.warning(self, "提交失败", "当前计划信息缺失，请刷新后重试。")
             return
+        plan_case_key = int(plan_case_id)
         remark = dialog.remark()
         failure_reason = dialog.failure_reason()
         bug_ref = dialog.bug_ref()
@@ -1805,6 +1921,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._monitoring.stop()
             self._append_log("监控停止请求已发送")
         self._awaiting_monitor_completion_for_pass = False
+        execution_start_time = self._case_execution_start_times.get(plan_case_key)
+        execution_end_time = dt.datetime.now(dt.timezone.utc).isoformat()
+        if not execution_start_time:
+            execution_start_time = execution_end_time
         try:
             self._api.submit_result(
                 int(plan_id),
@@ -1816,10 +1936,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 device_model_id=device_model_id,
                 plan_device_model_id=plan_device_model_id,
                 attachments=attachments or None,
+                execution_start_time=execution_start_time,
+                execution_end_time=execution_end_time,
             )
-        except ClientError as exc:
+        except (ClientError, ValueError) as exc:
             QtWidgets.QMessageBox.warning(self, "提交失败", str(exc))
             return
+        self._case_execution_start_times.pop(plan_case_key, None)
         self._monitoring.discard_session_state()
         self._logger.info(
             "提交结果: 用例 %s (结果=%s, 设备=%s, 计划设备=%s)",

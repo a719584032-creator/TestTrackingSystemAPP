@@ -32,13 +32,14 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
             )
             return
 
-        if not context.audio_log_files:
+        log_files = context.get_audio_log_files()
+        if not log_files:
             context.log(
                 f"未选择任何 Lab Audio 日志文件，无法监控 {display_action or action_key}。"
             )
             return
 
-        current_count = context.audio_event_cache.get(action_key, 0)
+        current_count = context.get_audio_event_count(action_key)
         if current_count >= target_count_int:
             context.log(
                 f"音频事件 {display_action or action_key} 已提前满足目标次数 {target_count_int}，当前计数 {current_count}。"
@@ -48,10 +49,10 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
             )
             return
 
-        for path in context.audio_log_files:
+        for path in log_files:
             try:
                 file_obj = open(path, "r", encoding="utf-8", errors="ignore")
-                start_pos = context.audio_log_offsets.get(path)
+                start_pos = context.get_audio_log_offset(path)
                 if start_pos is None:
                     file_obj.seek(0, os.SEEK_END)
                 else:
@@ -83,8 +84,7 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
                     progress_made = True
                     for normalized_key, event_keyword in AUDIO_EVENT_KEYWORDS.items():
                         if event_keyword in line:
-                            cached = context.audio_event_cache.get(normalized_key, 0) + 1
-                            context.audio_event_cache[normalized_key] = cached
+                            cached = context.increment_audio_event_count(normalized_key)
                             if normalized_key == action_key:
                                 current_count = cached
                                 context.log(
@@ -96,7 +96,7 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
                                     expected_keys=expected_keys,
                                 )
                     line = file_obj.readline()
-                context.audio_log_offsets[path] = file_obj.tell()
+                context.update_audio_log_offset(path, file_obj.tell())
                 if current_count >= target_count_int or not context.is_running:
                     break
             if current_count >= target_count_int or not context.is_running:

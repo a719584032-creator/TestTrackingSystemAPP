@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import getpass
 import hashlib
+import hmac
 import platform
 from typing import Optional
 
@@ -41,3 +43,40 @@ def decrypt_password(token: str) -> Optional[str]:
     except (InvalidToken, ValueError):
         return None
 
+
+def _parse_datetime_to_utc(value: str) -> dt.datetime:
+    """Parse *value* as ISO datetime string and convert to UTC."""
+
+    trimmed = (value or "").strip()
+    if not trimmed:
+        raise ValueError("value must not be empty")
+    iso_candidate = trimmed
+    if iso_candidate.endswith("Z"):
+        iso_candidate = iso_candidate[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(iso_candidate)
+    except ValueError as exc:
+        raise ValueError("invalid datetime format") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    else:
+        parsed = parsed.astimezone(dt.timezone.utc)
+    return parsed
+
+
+def encode_timestamp_token(value: str, secret: str) -> str:
+    """Encode *value* as a timestamp token signed with *secret*."""
+
+    if not secret:
+        raise ValueError("secret must not be empty")
+    timestamp = _parse_datetime_to_utc(value)
+    millis = int(timestamp.timestamp() * 1000)
+    timestamp_part = str(millis)
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        timestamp_part.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    token = f"{timestamp_part}.{signature}"
+    encoded = base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii")
+    return encoded
