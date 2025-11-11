@@ -1,4 +1,4 @@
-"""Shared filesystem helpers for PATVS specific storage locations."""
+"""用于获取日志根目录"""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def get_patvs_root() -> Path:
-    """Return the base directory for PATVS assets, creating it if missing."""
+    """创建并返回根目录"""
 
     default = Path("C:/PATVS") if os.name == "nt" else Path.home() / "PATVS"
     root_env = os.environ.get("PATVS_ROOT", str(default))
