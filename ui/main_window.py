@@ -292,7 +292,7 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.addWidget(QtWidgets.QLabel("模块目录"), 1, 2)
         self._directory_filter = QtWidgets.QComboBox()
         self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._directory_filter.addItem("全部", None)
+        self._directory_filter.addItem("请选择模块目录", None)
         filter_layout.addWidget(self._directory_filter, 1, 3)
 
         filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 4)
@@ -1226,7 +1226,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
         self._device_filter.addItem("请选择机型", None)
-        self._device_filter.addItem("全部机型", "__ALL__")
         for device_id, label in sorted(devices.items(), key=lambda item: item[1]):
             self._device_filter.addItem(label, device_id)
         self._device_filter.setEnabled(True)
@@ -1244,7 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         directories.sort()
         self._directory_filter.blockSignals(True)
         self._directory_filter.clear()
-        self._directory_filter.addItem("全部", None)
+        self._directory_filter.addItem("请选择模块目录", None)
         for directory in directories:
             self._directory_filter.addItem(directory, directory)
         self._directory_filter.blockSignals(False)
@@ -1408,7 +1407,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             case_entries = self._build_case_entries(case)
             for entry in case_entries:
-                if device_value not in (None, "__ALL__"):
+                if device_value is not None:
                     if isinstance(device_value, int):
                         if not entry.is_general and entry.device_model_id != int(device_value):
                             continue
