@@ -28,9 +28,14 @@ def _acquire_instance_lock() -> QtCore.QLockFile | None:
     if lock.tryLock():
         return lock
 
-    if lock.error() == QtCore.QLockFile.LockFailedError and lock.removeStaleLock():
-        if lock.tryLock():
-            return lock
+    remover = getattr(lock, "removeStaleLock", None)
+    if (
+        lock.error() == QtCore.QLockFile.LockFailedError
+        and callable(remover)
+        and remover()
+        and lock.tryLock()
+    ):
+        return lock
 
     if lock.error() == QtCore.QLockFile.LockFailedError:
         message = "已检测到另一个客户端实例正在运行，请先关闭后再尝试。"
