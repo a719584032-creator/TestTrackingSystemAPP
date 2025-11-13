@@ -59,6 +59,7 @@ class ClientSettings:
     monitoring_encryption_key: bytes = os.getenv(
         "MONITORING_ENCRYPTION_KEY", DEFAULT_MONITORING_ENCRYPTION_KEY
     ).encode("utf-8")
+    app_lock_file: Path = CONFIG_DIR / "tts_client.lock"
 
 
 SETTINGS = ClientSettings()
