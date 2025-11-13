@@ -49,7 +49,6 @@ class Patvs_Fuction:
 
     TEMP_FILE = SETTINGS.monitoring_temp_file
     CACHE_FILE = SETTINGS.monitoring_cache_file
-    ENCRYPTION_KEY = b"JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
 
     KEY_MAPPING = {
         "alt": keyboard.Key.alt,
@@ -175,7 +174,10 @@ class Patvs_Fuction:
         self._last_state_persist = 0.0
         self._min_state_save_interval = 5.0
         self._last_persisted_payload: dict[str, object] | None = None
-        self.session_store = SessionStateStore(self.TEMP_FILE, self.CACHE_FILE, self.ENCRYPTION_KEY)
+        self._encryption_key = SETTINGS.monitoring_encryption_key
+        self.session_store = SessionStateStore(
+            self.TEMP_FILE, self.CACHE_FILE, self._encryption_key
+        )
 
     # ------------------------------------------------------------------
     def log(self, message: str) -> None:
@@ -580,11 +582,11 @@ class Patvs_Fuction:
         return normalized_start, count, last_record_number, last_event_time
 
     def encrypt_data(self, data):
-        fernet = Fernet(self.ENCRYPTION_KEY)
+        fernet = Fernet(self._encryption_key)
         return fernet.encrypt(data.encode())
 
     def decrypt_data(self, encrypted_data):
-        fernet = Fernet(self.ENCRYPTION_KEY)
+        fernet = Fernet(self._encryption_key)
         return fernet.decrypt(encrypted_data).decode()
 
     def load_session_state(self):
@@ -681,7 +683,9 @@ class Patvs_Fuction:
 
     @classmethod
     def remove_temp_file(cls):
-        SessionStateStore(cls.TEMP_FILE, cls.CACHE_FILE, cls.ENCRYPTION_KEY).discard()
+        SessionStateStore(
+            cls.TEMP_FILE, cls.CACHE_FILE, SETTINGS.monitoring_encryption_key
+        ).discard()
 
     def normalize_action(self, action):
         return action.lower().replace(" ", "")

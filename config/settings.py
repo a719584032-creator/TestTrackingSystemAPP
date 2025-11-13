@@ -12,6 +12,7 @@ APP_NAME = "Test Tracking System"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
+DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
 
 
 @dataclass(slots=True)
@@ -55,6 +56,9 @@ class ClientSettings:
     monitoring_cache_file: Path = CONFIG_DIR / "monitoring_state.json"
     log_root: Path = PATVS_ROOT
     monitoring_temp_file: Path = PATVS_ROOT / "temp_action_and_num.json"
+    monitoring_encryption_key: bytes = os.getenv(
+        "MONITORING_ENCRYPTION_KEY", DEFAULT_MONITORING_ENCRYPTION_KEY
+    ).encode("utf-8")
 
 
 SETTINGS = ClientSettings()

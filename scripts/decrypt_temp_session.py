@@ -10,15 +10,12 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from config.settings import SETTINGS
 
-# 注意：该密钥需与 ``Patvs_Fuction.ENCRYPTION_KEY`` 中的值保持一致。
-DEFAULT_ENCRYPTION_KEY = b"JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
-
 
 def _resolve_key(encoded_key: str | None) -> bytes:
     """Return the encryption key to use for decrypting the session file."""
 
     if encoded_key is None:
-        return DEFAULT_ENCRYPTION_KEY
+        return SETTINGS.monitoring_encryption_key
     return encoded_key.encode("utf-8")
 
 
