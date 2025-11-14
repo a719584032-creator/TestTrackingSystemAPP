@@ -24,14 +24,14 @@ def _open_endpoint():
     volume = cast(interface, POINTER(IAudioEndpointVolume))  # IAudioEndpointVolume* 指针
     return devices, volume
 
-# def _close_endpoint(devices, volume):
-#     """显式释放 COM 对象，避免依赖 __del__ 在 CoUninitialize 之后再释放。"""
-#     with suppress(Exception):
-#         if volume is not None:
-#             volume.Release()
-#     with suppress(Exception):
-#         if devices is not None:
-#             devices.Release()
+def _close_endpoint(devices, volume):
+    """显式释放 COM 对象，避免依赖 __del__ 在 CoUninitialize 之后再释放。"""
+    with suppress(Exception):
+        if volume is not None:
+            volume.Release()
+    with suppress(Exception):
+        if devices is not None:
+            devices.Release()
 
 
 def run(
@@ -107,9 +107,7 @@ def run(
 
     finally:
         # 先释放所有 COM 指针，再反初始化 COM
-     #   _close_endpoint(devices, volume)
-        volume = None
-        devices = None
+        _close_endpoint(devices, volume)
         context.action_complete.set()
         if pythoncom is not None and coinited:
             with suppress(Exception):
