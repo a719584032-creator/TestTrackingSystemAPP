@@ -4,6 +4,7 @@ from __future__ import annotations
 from .api_client import ApiClient, encode_attachment
 from .auth import AuthStore, RememberedCredentials
 from .ota import OTAUpdater, UpdateInfo
+from .update_manager import UpdateManager
 
 __all__ = [
     "ApiClient",
@@ -11,5 +12,6 @@ __all__ = [
     "RememberedCredentials",
     "OTAUpdater",
     "UpdateInfo",
+    "UpdateManager",
     "encode_attachment",
 ]

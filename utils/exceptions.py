@@ -16,3 +16,7 @@ class ValidationError(ClientError):
 
 class NetworkError(ClientError):
     """Raised when an HTTP request cannot be completed."""
+
+
+class UpdateError(ClientError):
+    """Raised when the OTA update workflow fails."""

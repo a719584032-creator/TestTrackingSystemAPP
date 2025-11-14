@@ -18,6 +18,7 @@ class UpdateInfo:
     version: str
     release_notes: str
     download_url: str
+    checksum: str = ""
 
 
 class OTAUpdater:
@@ -42,4 +43,5 @@ class OTAUpdater:
             version=payload.get("version", ""),
             release_notes=payload.get("notes", ""),
             download_url=payload.get("download_url", ""),
+            checksum=payload.get("checksum", ""),
         )

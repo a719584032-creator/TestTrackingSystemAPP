@@ -5,7 +5,10 @@ import datetime as dt
 import json
 import logging
 import os
+import threading
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -22,9 +25,11 @@ from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
 from monitoring.parser import MonitoringAction, parse_keywords, require_attachment
 from services.api_client import ApiClient, encode_attachment
+from services.ota import UpdateInfo
+from services.update_manager import UpdateManager
 from ui.state import WindowStateStore
-from utils.exceptions import AuthenticationError, ClientError, ValidationError
-from config.settings import SETTINGS
+from utils.exceptions import AuthenticationError, ClientError, NetworkError, UpdateError, ValidationError
+from config.settings import APP_VERSION, SETTINGS
 
 
 STATUS_COLORS = {
@@ -203,12 +208,14 @@ class MainWindow(QtWidgets.QMainWindow):
         monitoring: MonitoringManager,
         state_store: WindowStateStore,
         user_info: Dict[str, object],
+        update_manager: UpdateManager,
     ) -> None:
         super().__init__()
         self._api = api_client
         self._monitoring = monitoring
         self._state_store = state_store
         self._user = user_info
+        self._updates = update_manager
         self._logger = logging.getLogger(__name__)
 
         self._departments: List[Department] = []
@@ -231,6 +238,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_files: List[str] = []
         self._pending_audio_logs: Optional[List[str]] = None
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
+        self._pending_update_info: Optional[UpdateInfo] = None
+        self._staged_update_path: Optional[Path] = None
+        self._download_dialog: Optional[QtWidgets.QProgressDialog] = None
+        self._update_check_thread: Optional[threading.Thread] = None
+        self._update_download_thread: Optional[threading.Thread] = None
 
         self._state_file_path = SETTINGS.ui_state_file
         self._restore_department_id: Optional[int] = None
@@ -239,7 +251,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_start_clicked = False
         self.restore_state()
 
-        self.setWindowTitle("TTS 测试执行客户端")
+        self.setWindowTitle(f"TTS 测试执行客户端 v{APP_VERSION}")
         self.resize(1200, 680)
         self.setMinimumSize(1024, 640)
         self._build_ui()
@@ -248,6 +260,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_window_state()
 
         QtCore.QTimer.singleShot(100, self._load_departments)
+        QtCore.QTimer.singleShot(2000, self._start_update_check)
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
@@ -1951,10 +1964,12 @@ class MainWindow(QtWidgets.QMainWindow):
             plan_device_model_id,
         )
         QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
-        self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
         self.save_state()
         self._reload_current_plan()
+        # 强制等待保证稳定性
+        time.sleep(1)
+        self._set_action_buttons_mode(False)
 
     def _reload_current_plan(self) -> None:
         self._pending_selection = self._selection_key(self._current_entry)
@@ -1978,4 +1993,154 @@ class MainWindow(QtWidgets.QMainWindow):
         self._state_store.save(geometry, state)
         if self._monitoring.is_running():
             self._monitoring.stop()
+        if self._download_dialog:
+            self._download_dialog.close()
         super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # OTA 更新流程
+    def _start_update_check(self) -> None:
+        if self._update_check_thread and self._update_check_thread.is_alive():
+            return
+        thread = threading.Thread(
+            target=self._run_update_check,
+            name="UpdateCheck",
+            daemon=True,
+        )
+        self._update_check_thread = thread
+        thread.start()
+
+    def _run_update_check(self) -> None:
+        try:
+            info = self._updates.check_for_updates()
+        except NetworkError as exc:
+            self._logger.info("OTA 检查失败: %s", exc)
+            return
+        if not info or not info.version:
+            return
+        if not self._updates.is_update_newer(info.version):
+            return
+        QtCore.QTimer.singleShot(0, lambda info=info: self._prompt_update(info))
+
+    def _prompt_update(self, info: UpdateInfo) -> None:
+        if self._pending_update_info and self._pending_update_info.version == info.version:
+            return
+        notes = info.release_notes.strip() if info.release_notes else "检测到新版本，建议立即升级。"
+        message = f"检测到新版本 {info.version}。\n\n{notes}\n\n是否立即下载并安装？"
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "发现新版本",
+            message,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.Yes,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            self._logger.info("用户暂缓升级到版本 %s", info.version)
+            return
+        self._begin_update_download(info)
+
+    def _begin_update_download(self, info: UpdateInfo) -> None:
+        self._pending_update_info = info
+        dialog = QtWidgets.QProgressDialog("正在下载更新...", None, 0, 100, self)
+        dialog.setWindowTitle("下载更新")
+        dialog.setCancelButton(None)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setModal(True)
+        dialog.setValue(0)
+        dialog.show()
+        self._download_dialog = dialog
+
+        thread = threading.Thread(
+            target=self._download_update_worker,
+            args=(info,),
+            name="UpdateDownload",
+            daemon=True,
+        )
+        self._update_download_thread = thread
+        thread.start()
+
+    def _download_update_worker(self, info: UpdateInfo) -> None:
+        def report_progress(downloaded: int, total: Optional[int]) -> None:
+            QtCore.QTimer.singleShot(
+                0,
+                lambda d=downloaded, t=total: self._update_download_progress(d, t),
+            )
+
+        try:
+            staged_path = self._updates.stage_update(info, report_progress)
+        except (NetworkError, UpdateError) as exc:
+            QtCore.QTimer.singleShot(0, lambda msg=str(exc): self._handle_update_error(msg))
+            return
+        QtCore.QTimer.singleShot(
+            0,
+            lambda staged=staged_path, meta=info: self._on_update_ready(meta, staged),
+        )
+
+    def _update_download_progress(self, downloaded: int, total: Optional[int]) -> None:
+        dialog = self._download_dialog
+        if dialog is None:
+            return
+        if not total or total <= 0:
+            dialog.setRange(0, 0)
+            dialog.setLabelText(f"正在下载更新（已接收 {self._format_size(downloaded)}）...")
+            return
+        dialog.setRange(0, 100)
+        percent = max(0, min(100, int(downloaded * 100 / total)))
+        dialog.setValue(percent)
+        dialog.setLabelText(f"正在下载更新（{percent}%）")
+
+    def _on_update_ready(self, info: UpdateInfo, staged_path: Path) -> None:
+        if self._download_dialog:
+            self._download_dialog.close()
+            self._download_dialog = None
+        self._staged_update_path = staged_path
+        if not self._updates.supports_in_place_update:
+            QtWidgets.QMessageBox.information(
+                self,
+                "更新已下载",
+                f"版本 {info.version} 已下载至:\n{staged_path}\n\n当前运行于开发环境，请手动替换目录完成升级。",
+            )
+            return
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "安装更新",
+            f"版本 {info.version} 已准备好安装，客户端需要重启以完成升级。是否现在重启？",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.Yes,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            self._logger.info("用户推迟安装版本 %s", info.version)
+            return
+        self._perform_update_installation(staged_path)
+
+    def _perform_update_installation(self, staged_path: Path) -> None:
+        try:
+            self._updates.launch_installer(staged_path, os.getpid())
+        except UpdateError as exc:
+            self._handle_update_error(str(exc))
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            "即将重启",
+            "客户端将退出并自动完成升级，稍后请重新登录继续执行。",
+        )
+        self._logger.info("已启动更新安装，将关闭客户端以释放文件锁")
+        self.close()
+
+    def _handle_update_error(self, message: str) -> None:
+        if self._download_dialog:
+            self._download_dialog.close()
+            self._download_dialog = None
+        self._pending_update_info = None
+        self._staged_update_path = None
+        QtWidgets.QMessageBox.warning(self, "更新失败", message)
+
+    def _format_size(self, value: int) -> str:
+        units = ["B", "KB", "MB", "GB"]
+        size = float(max(value, 0))
+        for unit in units:
+            if size < 1024.0:
+                return f"{size:.1f}{unit}"
+            size /= 1024.0
+        return f"{size:.1f}TB"
