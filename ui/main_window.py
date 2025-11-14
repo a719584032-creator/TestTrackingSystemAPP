@@ -202,6 +202,11 @@ class ResultDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     """Primary window containing the execution UI."""
 
+    _update_prompt_signal = QtCore.pyqtSignal(object)
+    _update_progress_signal = QtCore.pyqtSignal(int, object)
+    _update_ready_signal = QtCore.pyqtSignal(object, object)
+    _update_error_signal = QtCore.pyqtSignal(str)
+
     def __init__(
         self,
         api_client: ApiClient,
@@ -243,6 +248,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._download_dialog: Optional[QtWidgets.QProgressDialog] = None
         self._update_check_thread: Optional[threading.Thread] = None
         self._update_download_thread: Optional[threading.Thread] = None
+
+        self._update_prompt_signal.connect(self._prompt_update)
+        self._update_progress_signal.connect(self._update_download_progress)
+        self._update_ready_signal.connect(self._on_update_ready)
+        self._update_error_signal.connect(self._handle_update_error)
 
         self._state_file_path = SETTINGS.ui_state_file
         self._restore_department_id: Optional[int] = None
@@ -2020,7 +2030,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self._updates.is_update_newer(info.version):
             return
-        QtCore.QTimer.singleShot(0, lambda info=info: self._prompt_update(info))
+        self._update_prompt_signal.emit(info)
 
     def _prompt_update(self, info: UpdateInfo) -> None:
         if self._pending_update_info and self._pending_update_info.version == info.version:
@@ -2062,20 +2072,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _download_update_worker(self, info: UpdateInfo) -> None:
         def report_progress(downloaded: int, total: Optional[int]) -> None:
-            QtCore.QTimer.singleShot(
-                0,
-                lambda d=downloaded, t=total: self._update_download_progress(d, t),
-            )
+            self._update_progress_signal.emit(downloaded, total)
 
         try:
             staged_path = self._updates.stage_update(info, report_progress)
         except (NetworkError, UpdateError) as exc:
-            QtCore.QTimer.singleShot(0, lambda msg=str(exc): self._handle_update_error(msg))
+            self._update_error_signal.emit(str(exc))
             return
-        QtCore.QTimer.singleShot(
-            0,
-            lambda staged=staged_path, meta=info: self._on_update_ready(meta, staged),
-        )
+        self._update_ready_signal.emit(info, staged_path)
 
     def _update_download_progress(self, downloaded: int, total: Optional[int]) -> None:
         dialog = self._download_dialog
