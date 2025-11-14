@@ -9,7 +9,7 @@ from PyQt5 import QtWidgets
 from monitoring.manager import MonitoringManager
 from services.api_client import ApiClient
 from services.auth import AuthStore, RememberedCredentials
-from services.ota import OTAUpdater
+from services.update_manager import UpdateManager
 from .login_dialog import LoginDialog
 from .main_window import MainWindow
 from .state import WindowStateStore
@@ -30,7 +30,7 @@ def main() -> int:
     auth_store = AuthStore()
     window_state = WindowStateStore()
     monitoring = MonitoringManager()
-    updater = OTAUpdater()
+    update_manager = UpdateManager()
 
     login_dialog = LoginDialog()
     remembered = auth_store.load()
@@ -63,13 +63,8 @@ def main() -> int:
     if login_dialog.exec_() != QtWidgets.QDialog.Accepted:
         return 0
 
-    window = MainWindow(api_client, monitoring, window_state, user_info)
+    window = MainWindow(api_client, monitoring, window_state, user_info, update_manager)
     window.show()
-
-    # OTA 自动更新检查示例（需要时可按照下列步骤恢复逻辑）：
-    # 1. 调用 updater.check() 获取 update_info。
-    # 2. 捕获 NetworkError，将失败原因写入日志但不中断 UI。
-    # 3. 若获取到新版本，则弹窗提示用户访问下载链接。
 
     return app.exec_()
 
