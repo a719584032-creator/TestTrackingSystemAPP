@@ -261,7 +261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_start_clicked = False
         self.restore_state()
 
-        self.setWindowTitle(f"TTS 测试执行客户端 v{APP_VERSION}")
+        self.setWindowTitle(f"TTS测试执行客户端 v{APP_VERSION}")
         self.resize(1200, 680)
         self.setMinimumSize(1024, 640)
         self._build_ui()
