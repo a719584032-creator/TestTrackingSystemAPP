@@ -349,23 +349,81 @@ function Invoke-WithRetry {
             if ($attempt -ge $Retries) {
                 throw
             }
-            Write-Log ("$Description failed (attempt $attempt): " + $_.Exception.Message)
+            Write-Log ("$Description failed (attempt $attempt of $Retries): " + $_.Exception.Message)
             Start-Sleep -Seconds $DelaySeconds
         }
     }
 }
 
+function Mirror-Directory {
+    param(
+        [string]$Source,
+        [string]$Target
+    )
+
+    if (-not (Test-Path -LiteralPath $Source)) {
+        throw "Mirror source '$Source' does not exist."
+    }
+    if (-not (Test-Path -LiteralPath $Target)) {
+        New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    }
+
+    $arguments = "`"$Source`" "`"$Target`" /MIR /R:5 /W:2 /NFL /NDL /NJH /NJS /NP"
+    $process = Start-Process -FilePath "robocopy" -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+    if ($process.ExitCode -ge 8) {
+        throw "Robocopy failed with exit code $($process.ExitCode)."
+    }
+}
+
+function Stop-ProcessesInPath {
+    param(
+        [string]$Path,
+        [int]$ExcludePid
+    )
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Path).TrimEnd('\').ToLowerInvariant()
+    } catch {
+        Write-Log ("Unable to normalize path $Path: " + $_.Exception.Message)
+        return
+    }
+
+    try {
+        $processes = Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant().StartsWith($normalized)
+        }
+    } catch {
+        Write-Log ("Failed to list processes for $Path: " + $_.Exception.Message)
+        return
+    }
+
+    foreach ($proc in $processes) {
+        if ($proc.ProcessId -eq $ExcludePid) { continue }
+        Write-Log ("Stopping process {0} (PID {1}) still using target" -f $proc.Name, $proc.ProcessId)
+        try {
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            Wait-ForProcess $proc.ProcessId
+        } catch {
+            Write-Log ("Failed to stop process {0}: {1}" -f $proc.ProcessId, $_.Exception.Message)
+        }
+    }
+}
+
 $sourceRoot = $Source
+$installSucceeded = $false
 
 try {
     $payloadSource = Resolve-PayloadPath -Path $sourceRoot
+
     Write-Log "Waiting for process $TargetProcessId to exit"
     Wait-ForProcess $TargetProcessId
+    Stop-ProcessesInPath -Path $Target -ExcludePid $TargetProcessId
     Write-Log "Copying update files"
 
     $targetParent = Split-Path -Parent $Target
     $targetName = Split-Path -Leaf $Target
     $backup = Join-Path $targetParent ($targetName + ".bak")
+    $rotated = $false
 
     Invoke-WithRetry -Description "Remove old backup" -Action {
         if (Test-Path -LiteralPath $backup) {
@@ -373,23 +431,35 @@ try {
         }
     }
 
-    Invoke-WithRetry -Description "Rotate existing installation" -Action {
-        if (Test-Path -LiteralPath $Target) {
-            Rename-Item -LiteralPath $Target -NewName ($targetName + ".bak")
+    if (Test-Path -LiteralPath $Target) {
+        try {
+            Invoke-WithRetry -Description "Rotate existing installation" -Action {
+                Rename-Item -LiteralPath $Target -NewName ($targetName + ".bak")
+            }
+            $rotated = $true
+            Write-Log "Existing installation moved to $backup"
+        } catch {
+            Write-Log ("Rotate existing installation failed after retries: " + $_.Exception.Message + ". Falling back to in-place copy.")
         }
     }
 
-    Invoke-WithRetry -Description "Create target directory" -Action {
-        New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    Invoke-WithRetry -Description "Ensure target directory" -Action {
+        if ($rotated) {
+            New-Item -ItemType Directory -Path $Target -Force | Out-Null
+        } elseif (-not (Test-Path -LiteralPath $Target)) {
+            New-Item -ItemType Directory -Path $Target -Force | Out-Null
+        }
     }
 
-    Invoke-WithRetry -Description "Copy payload" -Action {
-        Copy-Item -Path (Join-Path $payloadSource '*') -Destination $Target -Recurse -Force
+    Invoke-WithRetry -Description "Mirror payload into target" -Action {
+        Mirror-Directory -Source $payloadSource -Target $Target
     }
 
-    Invoke-WithRetry -Description "Remove backup" -Action {
-        if (Test-Path -LiteralPath $backup) {
-            Remove-Item -LiteralPath $backup -Recurse -Force
+    if ($rotated) {
+        Invoke-WithRetry -Description "Remove backup" -Action {
+            if (Test-Path -LiteralPath $backup) {
+                Remove-Item -LiteralPath $backup -Recurse -Force
+            }
         }
     }
 
@@ -398,16 +468,21 @@ try {
 
     Write-Log "Launching updated client: $exePathInTarget"
     Start-Process -FilePath $exePathInTarget -WorkingDirectory $Target
+    $installSucceeded = $true
 } catch {
     Write-Log ("Update failed: " + $_.Exception.Message)
     throw
 } finally {
-    try {
-        if (Test-Path -LiteralPath $sourceRoot) {
-            Remove-Item -LiteralPath $sourceRoot -Recurse -Force
+    if ($installSucceeded) {
+        try {
+            if (Test-Path -LiteralPath $sourceRoot) {
+                Remove-Item -LiteralPath $sourceRoot -Recurse -Force
+            }
+        } catch {
+            Write-Log ("Cleanup failed: " + $_.Exception.Message)
         }
-    } catch {
-        Write-Log ("Cleanup failed: " + $_.Exception.Message)
+    } else {
+        Write-Log "Staging directory preserved for retry."
     }
 }
 """
