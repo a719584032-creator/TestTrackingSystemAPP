@@ -28,9 +28,8 @@ class ApiSettings:
 
 @dataclass(slots=True)
 class OTASettings:
-    """OTA 升级 URL设置"""
+    """OTA 升级配置"""
 
-    manifest_url: str = "https://ota.example.com/tts/manifest.json"
     download_dir: Path = CONFIG_DIR / "downloads"
 
     def ensure_dirs(self) -> None:
