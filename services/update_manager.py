@@ -291,6 +291,10 @@ class UpdateManager:
         - 拷贝新文件
         - 启动新版本客户端
         - 清理临时目录
+
+        同时做了两点鲁棒性处理：
+        - 自动下钻：如果 Source 目录下只有一个子目录，则进入该子目录
+        - 启动新程序时只使用可执行文件名，在 Target 下拼路径，避免路径不一致
         """
         script_path = self._download_root / "install_update.ps1"
         content = r"""
@@ -298,7 +302,7 @@ param(
     [string]$Source,
     [string]$Target,
     [string]$Executable,
-    [int]$Pid,
+    [int]$TargetProcessId,
     [string]$LogFile
 )
 
@@ -309,16 +313,24 @@ function Write-Log($Message) {
     Add-Content -Path $LogFile -Value "$stamp`t$Message"
 }
 
-function Wait-ForProcess($Pid) {
-    if ($Pid -le 0) { return }
-    while (Get-Process -Id $Pid -ErrorAction SilentlyContinue) {
+function Wait-ForProcess($ProcessId) {
+    if ($ProcessId -le 0) { return }
+    while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
         Start-Sleep -Seconds 1
     }
 }
 
 try {
-    Write-Log "等待进程 $Pid 退出"
-    Wait-ForProcess $Pid
+    # 自动下钻：如果 Source 下只有一个子目录，则进入该子目录
+    if (Test-Path -LiteralPath $Source -PathType Container) {
+        $subDirs = Get-ChildItem -LiteralPath $Source -Directory
+        if ($subDirs.Count -eq 1) {
+            $Source = $subDirs[0].FullName
+        }
+    }
+
+    Write-Log "等待进程 $TargetProcessId 退出"
+    Wait-ForProcess $TargetProcessId
     Write-Log "开始复制更新文件"
 
     $targetParent = Split-Path -Parent $Target
@@ -340,8 +352,12 @@ try {
         Remove-Item -LiteralPath $backup -Recurse -Force
     }
 
-    Write-Log "启动新版客户端"
-    Start-Process -FilePath $Executable -WorkingDirectory $Target
+    # 启动新版客户端：仅使用可执行文件名，在目标目录内拼接路径
+    $exeName = Split-Path -Leaf $Executable
+    $exePathInTarget = Join-Path $Target $exeName
+
+    Write-Log "启动新版客户端: $exePathInTarget"
+    Start-Process -FilePath $exePathInTarget -WorkingDirectory $Target
 } catch {
     Write-Log ("更新失败: " + $_.Exception.Message)
     throw
@@ -366,6 +382,10 @@ try {
         - 拷贝新文件
         - 启动新版本客户端
         - 清理临时目录
+
+        同时做了两点鲁棒性处理：
+        - 自动下钻：如果 SOURCE 下只有一个子目录，则进入该子目录
+        - 启动新程序时在 TARGET 下拼接可执行文件名
         """
         script_path = self._download_root / "install_update.sh"
         content = r"""#!/bin/sh
@@ -387,6 +407,14 @@ if [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null; then
     done
 fi
 
+# 自动下钻：如果 SOURCE 目录下只有一个子目录，则进入该子目录
+if [ -d "$SOURCE" ]; then
+    subdirs=$(find "$SOURCE" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+    if [ "$subdirs" -eq 1 ]; then
+        SOURCE=$(find "$SOURCE" -mindepth 1 -maxdepth 1 -type d)
+    fi
+fi
+
 log "开始复制更新文件"
 BACKUP="${TARGET}.bak"
 rm -rf "$BACKUP"
@@ -398,8 +426,12 @@ mkdir -p "$TARGET"
 cp -a "$SOURCE"/. "$TARGET"/
 rm -rf "$BACKUP"
 
-log "启动新版客户端"
-nohup "$EXECUTABLE" >/dev/null 2>&1 &
+# 在目标目录下拼接可执行文件路径
+EXEC_NAME=$(basename "$EXECUTABLE")
+EXEC_IN_TARGET="$TARGET/$EXEC_NAME"
+
+log "启动新版客户端: $EXEC_IN_TARGET"
+nohup "$EXEC_IN_TARGET" >/dev/null 2>&1 &
 rm -rf "$SOURCE"
 """
         script_path.write_text(content.strip() + "\n", encoding="utf-8")
