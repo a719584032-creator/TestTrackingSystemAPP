@@ -107,6 +107,7 @@ EVENT_SPECS: Dict[str, EventSpec] = {
     "AI_BUTTON": {'keywords': ["LENOVO_AI_BUTTON"], 'description': "AI button"},
     "EXIT_SLEEP_BUTTON": {'keywords': ["LENOVO_EXIT_SLEEP_BUTTON"], 'description': "按键退出休眠"},
     "EXIT_SLEEP_MIC": {'keywords': ["LENOVO_EXIT_SLEEP_MIC"], 'description': "麦秆拨动退出休眠"},
+    "BUTTON_CLICK": {'keywords': ["LENOVO_BUTTON_CLICK"], 'description': "耳机单击按键"},
 }
 
 

@@ -128,19 +128,19 @@ class ApiClient:
         ]
 
         self._log_time_parameters(time_parameters)
-        logger.info(
-            "提交结果请求参数(plan_id=%s, plan_case_id=%s): %s",
-            plan_id,
-            plan_case_id,
-            self._submission_payload_for_logging(body),
-        )
+        # logger.info(
+        #     "提交结果请求参数(plan_id=%s, plan_case_id=%s): %s",
+        #     plan_id,
+        #     plan_case_id,
+        #     self._submission_payload_for_logging(body),
+        # )
         response = self._request("POST", f"/test-plans/{plan_id}/results", json=body)
-        logger.info(
-            "提交结果响应(plan_id=%s, plan_case_id=%s): %s",
-            plan_id,
-            plan_case_id,
-            response,
-        )
+        # logger.info(
+        #     "提交结果响应(plan_id=%s, plan_case_id=%s): %s",
+        #     plan_id,
+        #     plan_case_id,
+        #     response,
+        # )
         return response
 
     # ------------------------------------------------------------------
@@ -157,7 +157,7 @@ class ApiClient:
         self, params: Sequence[Tuple[str, str, str]]
     ) -> None:
         for field, raw_value, encrypted_value in params:
-            logger.info(
+            logger.debug(
                 "时间参数 %s: 原始=%s, 加密=%s",
                 field,
                 raw_value,
