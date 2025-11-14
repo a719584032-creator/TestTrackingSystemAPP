@@ -320,15 +320,45 @@ function Wait-ForProcess($ProcessId) {
     }
 }
 
-try {
-    # Auto descend: if the source directory has exactly one child directory, use it
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $subDirs = Get-ChildItem -LiteralPath $Source -Directory
-        if ($subDirs.Count -eq 1) {
-            $Source = $subDirs[0].FullName
+function Resolve-PayloadPath([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Source path '$Path' does not exist."
+    }
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        $entries = Get-ChildItem -LiteralPath $Path
+        if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
+            return $entries[0].FullName
         }
     }
+    return $Path
+}
 
+function Invoke-WithRetry {
+    param(
+        [scriptblock]$Action,
+        [string]$Description,
+        [int]$Retries = 30,
+        [int]$DelaySeconds = 1
+    )
+
+    for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+        try {
+            & $Action
+            return
+        } catch {
+            if ($attempt -ge $Retries) {
+                throw
+            }
+            Write-Log ("$Description failed (attempt $attempt): " + $_.Exception.Message)
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
+$sourceRoot = $Source
+
+try {
+    $payloadSource = Resolve-PayloadPath -Path $sourceRoot
     Write-Log "Waiting for process $TargetProcessId to exit"
     Wait-ForProcess $TargetProcessId
     Write-Log "Copying update files"
@@ -337,22 +367,32 @@ try {
     $targetName = Split-Path -Leaf $Target
     $backup = Join-Path $targetParent ($targetName + ".bak")
 
-    if (Test-Path -LiteralPath $backup) {
-        Remove-Item -LiteralPath $backup -Recurse -Force
+    Invoke-WithRetry -Description "Remove old backup" -Action {
+        if (Test-Path -LiteralPath $backup) {
+            Remove-Item -LiteralPath $backup -Recurse -Force
+        }
     }
 
-    if (Test-Path -LiteralPath $Target) {
-        Rename-Item -LiteralPath $Target -NewName ($targetName + ".bak")
+    Invoke-WithRetry -Description "Rotate existing installation" -Action {
+        if (Test-Path -LiteralPath $Target) {
+            Rename-Item -LiteralPath $Target -NewName ($targetName + ".bak")
+        }
     }
 
-    New-Item -ItemType Directory -Path $Target -Force | Out-Null
-    Copy-Item -Path (Join-Path $Source '*') -Destination $Target -Recurse -Force
-
-    if (Test-Path -LiteralPath $backup) {
-        Remove-Item -LiteralPath $backup -Recurse -Force
+    Invoke-WithRetry -Description "Create target directory" -Action {
+        New-Item -ItemType Directory -Path $Target -Force | Out-Null
     }
 
-    # Launch the new client: only use the executable name and rebuild the path in the target folder
+    Invoke-WithRetry -Description "Copy payload" -Action {
+        Copy-Item -Path (Join-Path $payloadSource '*') -Destination $Target -Recurse -Force
+    }
+
+    Invoke-WithRetry -Description "Remove backup" -Action {
+        if (Test-Path -LiteralPath $backup) {
+            Remove-Item -LiteralPath $backup -Recurse -Force
+        }
+    }
+
     $exeName = Split-Path -Leaf $Executable
     $exePathInTarget = Join-Path $Target $exeName
 
@@ -363,8 +403,8 @@ try {
     throw
 } finally {
     try {
-        if (Test-Path -LiteralPath $Source) {
-            Remove-Item -LiteralPath $Source -Recurse -Force
+        if (Test-Path -LiteralPath $sourceRoot) {
+            Remove-Item -LiteralPath $sourceRoot -Recurse -Force
         }
     } catch {
         Write-Log ("Cleanup failed: " + $_.Exception.Message)
