@@ -285,27 +285,34 @@ class UpdateManager:
 
     def _write_windows_script(self) -> Path:
         """
-        生成 Windows 专用的 PowerShell 更新脚本，负责：
-        - 等待旧进程退出
-        - 备份旧目录
-        - 拷贝新文件
-        - 启动新版本客户端
-        - 清理临时目录
+        生成 Windows 专用的 PowerShell 更新脚本。
 
-        这里不再在代码里硬编码脚本内容，而是复用仓库中的
-        install_update_fixed.ps1 模板，将其复制到下载目录中，
-        命名为 install_update.ps1 供后续调用。
+        这里从打包好的模板脚本 data/install_update_fixed.ps1
+        读取内容，写入到下载目录下的 install_update.ps1，
+        然后由外部 powershell 调用。
         """
         script_path = self._download_root / "install_update.ps1"
 
-        template_path = Path(__file__).with_name("install_update_fixed.ps1")
+        # 项目根目录
+        repo_root = Path(__file__).resolve().parents[1]
+
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            # PyInstaller 运行时的数据目录
+            data_dir = Path(sys._MEIPASS) / "data"
+        else:
+            # 源码运行：直接用仓库里的 data 目录
+            data_dir = repo_root / "data"
+
+        template_path = data_dir / "install_update_fixed.ps1"
 
         try:
             content = template_path.read_text(encoding="utf-8")
         except OSError as exc:
-            # 读取不到模板时直接视为更新失败
-            raise UpdateError(f"无法读取更新脚本模板文件: {exc}") from exc
+            raise UpdateError(
+                f"无法读取更新脚本模板文件: {template_path!s}，错误: {exc}"
+            ) from exc
 
+        # 写到下载目录，供 _build_install_command 调用
         script_path.write_text(content, encoding="utf-8")
         return script_path
 
