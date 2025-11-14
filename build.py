@@ -7,9 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from config.settings import APP_VERSION
+
 ROOT = Path(__file__).resolve().parent
 BUILD_DIR = ROOT / "build"
-DIST_DIR = ROOT / "dist"
+DIST_ROOT = ROOT / "dist"
+APP_NAME = "tts-app"
 
 
 def _collect_hidden_imports(packages: list[str]) -> list[str]:
@@ -39,11 +42,13 @@ def _collect_data_directories(directories: list[str]) -> list[tuple[str, str]]:
     return data_entries
 
 
-def build_executable(output_dir: str = "dist") -> None:
+def build_executable(output_root: str = "dist") -> None:
     """打包"""
 
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    DIST_ROOT.mkdir(parents=True, exist_ok=True)
+    versioned_dist = ROOT / output_root / f"{APP_NAME}-{APP_VERSION}"
+    versioned_dist.mkdir(parents=True, exist_ok=True)
 
     packages = [
         "config",
@@ -66,23 +71,25 @@ def build_executable(output_dir: str = "dist") -> None:
         "--noconfirm",
         "--clean",
         "--name",
-        "patvs-client",
+        APP_NAME,
         "--distpath",
-        str(ROOT / output_dir),
+        str(versioned_dist),
         "--workpath",
         str(BUILD_DIR / "work"),
         "--specpath",
         str(BUILD_DIR),
         "--paths",
         str(ROOT),
-        "--noconsole"
+        "--noconsole",
     ]
 
     for source, destination in data_entries:
-        cmd.extend([
-            "--add-data",
-            f"{source}{os.pathsep}{destination}",
-        ])
+        cmd.extend(
+            [
+                "--add-data",
+                f"{source}{os.pathsep}{destination}",
+            ]
+        )
 
     for module_name in hidden_imports:
         cmd.extend(["--hidden-import", module_name])
