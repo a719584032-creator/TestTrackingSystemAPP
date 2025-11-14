@@ -2119,16 +2119,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._perform_update_installation(staged_path)
 
     def _perform_update_installation(self, staged_path: Path) -> None:
-        try:
-            self._updates.launch_installer(staged_path, os.getpid())
-        except UpdateError as exc:
-            self._handle_update_error(str(exc))
-            return
         QtWidgets.QMessageBox.information(
             self,
             "即将重启",
             "客户端将退出并自动完成升级，稍后请重新登录继续执行。",
         )
+        self._launch_installer_and_close(staged_path)
+
+    def _launch_installer_and_close(self, staged_path: Path) -> None:
+        try:
+            self._updates.launch_installer(staged_path, os.getpid())
+        except UpdateError as exc:
+            self._handle_update_error(str(exc))
+            return
         self._logger.info("已启动更新安装，将关闭客户端以释放文件锁")
         self.close()
 

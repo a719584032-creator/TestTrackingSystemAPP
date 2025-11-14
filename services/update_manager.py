@@ -321,7 +321,7 @@ function Wait-ForProcess($ProcessId) {
 }
 
 try {
-    # 自动下钻：如果 Source 下只有一个子目录，则进入该子目录
+    # Auto descend: if the source directory has exactly one child directory, use it
     if (Test-Path -LiteralPath $Source -PathType Container) {
         $subDirs = Get-ChildItem -LiteralPath $Source -Directory
         if ($subDirs.Count -eq 1) {
@@ -329,9 +329,9 @@ try {
         }
     }
 
-    Write-Log "等待进程 $TargetProcessId 退出"
+    Write-Log "Waiting for process $TargetProcessId to exit"
     Wait-ForProcess $TargetProcessId
-    Write-Log "开始复制更新文件"
+    Write-Log "Copying update files"
 
     $targetParent = Split-Path -Parent $Target
     $targetName = Split-Path -Leaf $Target
@@ -352,14 +352,14 @@ try {
         Remove-Item -LiteralPath $backup -Recurse -Force
     }
 
-    # 启动新版客户端：仅使用可执行文件名，在目标目录内拼接路径
+    # Launch the new client: only use the executable name and rebuild the path in the target folder
     $exeName = Split-Path -Leaf $Executable
     $exePathInTarget = Join-Path $Target $exeName
 
-    Write-Log "启动新版客户端: $exePathInTarget"
+    Write-Log "Launching updated client: $exePathInTarget"
     Start-Process -FilePath $exePathInTarget -WorkingDirectory $Target
 } catch {
-    Write-Log ("更新失败: " + $_.Exception.Message)
+    Write-Log ("Update failed: " + $_.Exception.Message)
     throw
 } finally {
     try {
@@ -367,7 +367,7 @@ try {
             Remove-Item -LiteralPath $Source -Recurse -Force
         }
     } catch {
-        Write-Log ("清理失败: " + $_.Exception.Message)
+        Write-Log ("Cleanup failed: " + $_.Exception.Message)
     }
 }
 """
@@ -400,14 +400,14 @@ log() {
     printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOGFILE"
 }
 
-log "等待进程 $PID 退出"
+log "Waiting for process $PID to exit"
 if [ -n "$PID" ] && [ "$PID" -gt 0 ] 2>/dev/null; then
     while kill -0 "$PID" 2>/dev/null; do
         sleep 1
     done
 fi
 
-# 自动下钻：如果 SOURCE 目录下只有一个子目录，则进入该子目录
+# Auto descend: if SOURCE has exactly one child directory, use it
 if [ -d "$SOURCE" ]; then
     subdirs=$(find "$SOURCE" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
     if [ "$subdirs" -eq 1 ]; then
@@ -415,7 +415,7 @@ if [ -d "$SOURCE" ]; then
     fi
 fi
 
-log "开始复制更新文件"
+log "Copying update files"
 BACKUP="${TARGET}.bak"
 rm -rf "$BACKUP"
 if [ -d "$TARGET" ]; then
@@ -426,11 +426,11 @@ mkdir -p "$TARGET"
 cp -a "$SOURCE"/. "$TARGET"/
 rm -rf "$BACKUP"
 
-# 在目标目录下拼接可执行文件路径
+# Build executable path inside the target directory
 EXEC_NAME=$(basename "$EXECUTABLE")
 EXEC_IN_TARGET="$TARGET/$EXEC_NAME"
 
-log "启动新版客户端: $EXEC_IN_TARGET"
+log "Launching updated client: $EXEC_IN_TARGET"
 nohup "$EXEC_IN_TARGET" >/dev/null 2>&1 &
 rm -rf "$SOURCE"
 """
