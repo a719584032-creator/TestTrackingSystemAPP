@@ -2,21 +2,19 @@
 from __future__ import annotations
 
 import time
-from ctypes import POINTER, cast
 from typing import TYPE_CHECKING
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+from ..volume_service import VolumeEndpointService
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
 def _read_volume_level() -> float:
-    """按照旧实现的方式读取一次音量，不做额外的 COM 生命周期管理。"""
-    devices = AudioUtilities.GetSpeakers()
-    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    volume = cast(interface, POINTER(IAudioEndpointVolume))
-    return float(volume.GetMasterVolumeLevelScalar())
+    """通过共享音量服务读取音量，避免各线程管理 COM。"""
+
+    service = VolumeEndpointService.instance()
+    return service.get_volume()
 
 
 def run(
