@@ -1902,7 +1902,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
         self._reload_current_plan()
         # 强制等待保证稳定性
-        time.sleep(1)
+        time.sleep(0.5)
         self._set_action_buttons_mode(False)
 
     def _reload_current_plan(self) -> None:
