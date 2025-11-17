@@ -261,7 +261,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_start_clicked = False
         self.restore_state()
 
-        self.setWindowTitle(f"TTS测试执行客户端 v{APP_VERSION}")
+        self._update_window_title()
         self.resize(1200, 680)
         self.setMinimumSize(1024, 640)
         self._build_ui()
@@ -337,121 +337,28 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.addWidget(filter_box)
 
         plan_box = QtWidgets.QGroupBox("计划总览")
-        plan_box.setStyleSheet(
-            """
-            QGroupBox {
-                border: 1px solid #E5E7EB;
-                border-radius: 10px;
-                margin-top: 12px;
-                font-weight: 600;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 6px;
-                color: #1F2937;
-                font-size: 15px;
-            }
-            """
-        )
-        plan_layout = QtWidgets.QVBoxLayout(plan_box)
-        plan_layout.setSpacing(14)
-        plan_layout.setContentsMargins(20, 24, 20, 20)
-
-        header_row = QtWidgets.QHBoxLayout()
-        header_row.setSpacing(12)
-
-        info_layout = QtWidgets.QVBoxLayout()
-        info_layout.setSpacing(4)
-
-        plan_header_style = "font-size: 25px; font-weight: 600; color: #111827;padding-left: 5px;"
-        plan_body_style = "font-size: 25px;color: #111827;padding-left: 5px;"
-
-        self._plan_title_label = QtWidgets.QLabel("未选择计划")
-        self._plan_title_label.setStyleSheet(plan_header_style)
-        self._plan_title_label.setWordWrap(True)
-        info_layout.addWidget(self._plan_title_label)
+        plan_layout = QtWidgets.QHBoxLayout(plan_box)
+        plan_layout.setSpacing(16)
+        plan_layout.setContentsMargins(12, 10, 12, 10)
 
         self._plan_period_label = QtWidgets.QLabel("执行时间：—")
-        self._plan_period_label.setStyleSheet(plan_body_style)
         self._plan_period_label.setWordWrap(True)
-        info_layout.addWidget(self._plan_period_label)
+        plan_layout.addWidget(self._plan_period_label, stretch=2)
 
         self._plan_tester_label = QtWidgets.QLabel("执行人员：—")
-        self._plan_tester_label.setStyleSheet(plan_body_style)
         self._plan_tester_label.setWordWrap(True)
-        info_layout.addWidget(self._plan_tester_label)
+        plan_layout.addWidget(self._plan_tester_label, stretch=1)
 
-        header_row.addLayout(info_layout, stretch=1)
+        self._plan_progress_label = QtWidgets.QLabel("执行进度：—")
+        self._plan_progress_label.setWordWrap(True)
+        plan_layout.addWidget(self._plan_progress_label, stretch=2)
 
-        self._plan_status_label = QtWidgets.QLabel("未选择")
-        self._plan_status_label.setAlignment(QtCore.Qt.AlignCenter)
-        self._plan_status_label.setStyleSheet(
-            f"""
-          QLabel {{
-              background-color: "#374151";
-              color: #FFFFFF;
-              border: none;
-              border-radius: 14px;
-              padding: 4px 12px;
-              font-weight: 600;
-              font-size: 23px;
-          }}
-          """
-        )
-        self._plan_status_label.setFixedHeight(36)
-        self._plan_status_label.setMinimumWidth(96)
-        self._plan_status_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed
-        )
-        self._apply_status_style(DEFAULT_STATUS_COLOR)
-        header_row.addWidget(
-            self._plan_status_label, 0, QtCore.Qt.AlignRight | QtCore.Qt.AlignTop
-        )
-
-        plan_layout.addLayout(header_row)
-
-        stats_box = QtWidgets.QWidget()
-        stats_box.setStyleSheet(
-            "background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;"
-        )
-        stats_layout = QtWidgets.QHBoxLayout(stats_box)
-        stats_layout.setContentsMargins(12, 10, 12, 10)
-        stats_layout.setSpacing(8)
-        self._plan_stat_labels: Dict[str, Tuple[QtWidgets.QLabel, str]] = {}
-        stat_configs = [
-            ("total", "总数", "#EEF2FF", "#1E3A8A"),
-            ("executed", "已执行", "#ECFEFF", "#155E75"),
-            ("pass", "通过", "#DCFCE7", "#047857"),
-            ("fail", "失败", "#FEE2E2", "#B91C1C"),
-            ("block", "阻塞", "#FEF3C7", "#B45309"),
-            ("notrun", "未执行", "#E5E7EB", "#374151"),
-        ]
-        for key, title, bg, fg in stat_configs:
-            pill = QtWidgets.QLabel(f"{title} 0")
-            pill.setAlignment(QtCore.Qt.AlignCenter)
-            pill.setStyleSheet(
-                f"""
-                QLabel {{
-                    background-color: {bg};
-                    color: {fg};
-                    border-radius: 10px;
-                    padding: 6px 12px;
-                    font-weight: 600;
-                    font-size: 23px;
-                }}
-                """
-            )
-            stats_layout.addWidget(pill)
-            self._plan_stat_labels[key] = (pill, title)
-        stats_layout.addStretch()
-        plan_layout.addWidget(stats_box)
+        plan_layout.addStretch(1)
 
         root_layout.addWidget(plan_box)
 
         # ------------------------------------------------------------------
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        root_layout.addWidget(splitter, stretch=1)
 
         # 左侧面板：筛选与用例树
         left_widget = QtWidgets.QWidget()
@@ -558,41 +465,66 @@ class MainWindow(QtWidgets.QMainWindow):
         title_row.addStretch()
         case_layout.addLayout(title_row)
 
-        self._precondition_title = QtWidgets.QLabel("前置条件")
-        self._precondition_title.setStyleSheet("font-weight: 600;")
-        case_layout.addWidget(self._precondition_title)
+        self._precondition_label = QtWidgets.QLabel("前置条件：暂无前置条件")
+        self._precondition_label.setWordWrap(True)
+        self._precondition_label.setStyleSheet("color: #374151;")
+        self._precondition_label.setTextInteractionFlags(
+            QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard
+        )
+        case_layout.addWidget(self._precondition_label)
 
-        self._precondition_view = QtWidgets.QPlainTextEdit()
-        self._precondition_view.setReadOnly(True)
-        self._precondition_view.setPlaceholderText("暂无前置条件")
-        self._precondition_view.setMinimumHeight(80)
-        case_layout.addWidget(self._precondition_view)
+        detail_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        detail_splitter.setChildrenCollapsible(False)
+        detail_splitter.setHandleWidth(8)
 
+        steps_section = QtWidgets.QWidget()
+        steps_layout = QtWidgets.QVBoxLayout(steps_section)
+        steps_layout.setContentsMargins(0, 0, 0, 0)
+        steps_layout.setSpacing(6)
         self._steps_title = QtWidgets.QLabel("执行步骤")
         self._steps_title.setStyleSheet("font-weight: 600;")
-        case_layout.addWidget(self._steps_title)
+        steps_layout.addWidget(self._steps_title)
 
         self._steps_view = QtWidgets.QPlainTextEdit()
         self._steps_view.setReadOnly(True)
         self._steps_view.setPlaceholderText("暂无执行步骤")
-        self._steps_view.setMinimumHeight(160)
-        case_layout.addWidget(self._steps_view)
+        self._steps_view.setMinimumHeight(200)
+        self._steps_view.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        steps_layout.addWidget(self._steps_view)
+        detail_splitter.addWidget(steps_section)
 
+        expected_section = QtWidgets.QWidget()
+        expected_layout = QtWidgets.QVBoxLayout(expected_section)
+        expected_layout.setContentsMargins(0, 0, 0, 0)
+        expected_layout.setSpacing(6)
         self._expected_title = QtWidgets.QLabel("预期结果")
         self._expected_title.setStyleSheet("font-weight: 600;")
-        case_layout.addWidget(self._expected_title)
+        expected_layout.addWidget(self._expected_title)
 
         self._expected_view = QtWidgets.QPlainTextEdit()
         self._expected_view.setReadOnly(True)
         self._expected_view.setPlaceholderText("暂无预期结果")
-        self._expected_view.setMinimumHeight(100)
-        case_layout.addWidget(self._expected_view)
+        self._expected_view.setMinimumHeight(120)
+        self._expected_view.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        expected_layout.addWidget(self._expected_view)
+        detail_splitter.addWidget(expected_section)
+        detail_splitter.setStretchFactor(0, 5)
+        detail_splitter.setStretchFactor(1, 3)
+
+        case_layout.addWidget(detail_splitter, stretch=1)
 
         self._attachment_hint = QtWidgets.QLabel("")
         self._attachment_hint.setStyleSheet("color: #2563eb;")
         case_layout.addWidget(self._attachment_hint)
 
-        right_layout.addWidget(case_box)
+        case_box.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        right_layout.addWidget(case_box, stretch=3)
 
         monitor_box = QtWidgets.QGroupBox("监控日志")
         monitor_layout = QtWidgets.QVBoxLayout(monitor_box)
@@ -637,7 +569,7 @@ class MainWindow(QtWidgets.QMainWindow):
         monitor_splitter.setStretchFactor(1, 2)
         monitor_layout.addWidget(monitor_splitter)
 
-        right_layout.addWidget(monitor_box, stretch=1)
+        right_layout.addWidget(monitor_box, stretch=2)
 
         action_frame = QtWidgets.QFrame()
         action_layout = QtWidgets.QHBoxLayout(action_frame)
@@ -662,28 +594,12 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.addWidget(right_widget)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        root_layout.addWidget(splitter, stretch=1)
 
         # 状态栏
         status = QtWidgets.QStatusBar()
         self.setStatusBar(status)
-        user_name = self._user.get("real_name") or self._user.get("username", "未登录")
-        status.showMessage(f"当前用户: {user_name}")
-
-    # ------------------------------------------------------------------
-    def _apply_status_style(self, color: str) -> None:
-        self._plan_status_label.setStyleSheet(
-            f"""
-            QLabel {{
-                background-color: {color};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 14px;
-                padding: 4px 12px;
-                font-weight: 600;
-                font-size: 23px;
-            }}
-            """
-        )
+        status.clearMessage()
 
     def _style_action_button(self, button: QtWidgets.QPushButton, color: str) -> None:
         hover_color = self._tint_color(color, 1.1)
@@ -859,6 +775,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
+
+    def _current_user_display_name(self) -> str:
+        if not isinstance(self._user, dict):
+            return "未登录"
+        return str(self._user.get("real_name") or self._user.get("username") or "未登录")
+
+    def _update_window_title(self) -> None:
+        base_title = f"TTS测试执行客户端 v{APP_VERSION}"
+        user_name = self._current_user_display_name()
+        if user_name:
+            self.setWindowTitle(f"{base_title} - 当前用户: {user_name}")
+        else:
+            self.setWindowTitle(base_title)
 
     def _state_username(self) -> str:
         if not isinstance(self._user, dict):
@@ -1448,13 +1377,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_plan_summary(self) -> None:
         detail = self._plan_detail
         if not detail:
-            self._plan_status_label.setText("未选择")
-            self._apply_status_style(DEFAULT_STATUS_COLOR)
-            self._plan_title_label.setText("未选择计划")
             self._plan_period_label.setText("执行时间：—")
             self._plan_tester_label.setText("执行人员：—")
-            for key, (label, title) in self._plan_stat_labels.items():
-                label.setText(f"{title} 0")
+            self._plan_progress_label.setText("执行进度：—")
             return
 
         if detail.start_date and detail.end_date:
@@ -1467,10 +1392,6 @@ class MainWindow(QtWidgets.QMainWindow):
             period = "-"
 
         testers = "、".join(detail.tester_names()) or "未分配"
-        status_text = detail.status or "未开始"
-        self._plan_status_label.setText(status_text)
-        self._apply_status_style(STATUS_COLORS.get(status_text, DEFAULT_STATUS_COLOR))
-        self._plan_title_label.setText(detail.name or "未命名计划")
         self._plan_period_label.setText(f"执行时间：{period}")
         self._plan_tester_label.setText(f"执行人员：{testers}")
 
@@ -1480,7 +1401,6 @@ class MainWindow(QtWidgets.QMainWindow):
             "pass": 0,
             "fail": 0,
             "block": 0,
-            "notrun": 0,
         }
         if detail.statistics:
             stats = detail.statistics
@@ -1491,12 +1411,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     "pass": stats.passed,
                     "fail": stats.failed,
                     "block": stats.blocked,
-                    "notrun": stats.not_run,
                 }
             )
 
-        for key, (label, title) in self._plan_stat_labels.items():
-            label.setText(f"{title} {stats_values.get(key, 0)}")
+        executed = stats_values["executed"]
+        total = stats_values["total"]
+        pass_count = stats_values["pass"]
+        fail_count = stats_values["fail"]
+        block_count = stats_values["block"]
+        self._plan_progress_label.setText(
+            f"执行进度：{executed}/{total} (通过 {pass_count} | 失败 {fail_count} | 阻塞 {block_count})"
+        )
 
     def _refresh_case_tree(self) -> None:
         self._case_tree.blockSignals(True)
@@ -1750,7 +1675,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._title_label.setText("请选择一条用例")
             self._title_icon_label.clear()
             self._title_icon_label.setVisible(False)
-            self._precondition_view.clear()
+            self._precondition_label.setText("前置条件: 暂无前置条件")
             self._steps_view.clear()
             self._expected_view.clear()
             self._keyword_list.clear()
@@ -1769,9 +1694,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._title_icon_label.clear()
             self._title_icon_label.setVisible(False)
 
-        preconditions = (case.preconditions or "").strip()
-        self._precondition_view.setPlainText(preconditions or "暂无前置条件")
-        self._precondition_view.verticalScrollBar().setValue(0)
+        preconditions = (case.preconditions or "").strip() or "暂无前置条件"
+        self._precondition_label.setText(f"前置条件: {preconditions}")
 
         step_lines: List[str] = []
         for index, step in enumerate(case.steps or [], start=1):
