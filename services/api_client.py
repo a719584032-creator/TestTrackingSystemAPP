@@ -24,6 +24,7 @@ class ApiClient:
         settings = client_settings.api
         self.base_url = base_url or settings.base_url.rstrip("/")
         self.timeout = timeout or settings.timeout
+        self.verify_ssl = settings.verify_ssl
         self._time_secret = client_settings.crypto.result_time_secret
         self._token: Optional[str] = None
 
@@ -202,6 +203,7 @@ class ApiClient:
                 params=params,
                 json=json,
                 timeout=self.timeout,
+                verify=self.verify_ssl,
             )
         except requests.RequestException as exc:  # pragma: no cover - 网络异常兜底
             logger.exception("Network error while calling %s", url)

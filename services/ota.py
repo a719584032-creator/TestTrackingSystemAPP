@@ -34,7 +34,7 @@ class OTAUpdater:
     def check(self) -> Optional[UpdateInfo]:
         url = urljoin(self._server_origin(), "/api/ota/latest")
         try:
-            response = requests.get(url, timeout=self._api_settings.timeout)
+            response = requests.get(url, timeout=self._api_settings.timeout, verify=False)
             response.raise_for_status()
         except requests.RequestException as exc:
             logger.warning("Failed to query OTA manifest: %s", exc)

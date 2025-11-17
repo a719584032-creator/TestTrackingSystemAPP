@@ -20,10 +20,12 @@ DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4
 class ApiSettings:
     """API 设置"""
 
-    base_url: str = "http://10.184.46.54:5173/api"
+    base_url: str = "https://patvs.lenovo.com/api"
+    #base_url: str = "http://10.184.46.54:5173/api"
     #base_url: str = "http://172.28.79.247:5173/api"
 
-    timeout: int = 30
+    timeout: int = 60
+    verify_ssl: bool = False
 
 
 @dataclass(slots=True)
