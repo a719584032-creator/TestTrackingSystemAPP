@@ -262,7 +262,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.restore_state()
 
         self._update_window_title()
-        self.resize(1200, 680)
+        self.resize(1280, 1024)
         self.setMinimumSize(1024, 640)
         self._build_ui()
         self._apply_pending_audio_logs()
