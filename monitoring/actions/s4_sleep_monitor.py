@@ -5,14 +5,12 @@ import time
 from typing import TYPE_CHECKING
 
 import win32evtlog
-
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
 def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     """统计并监控 S4 睡眠事件。"""
-    s4_times_ = S4_times(context)
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
@@ -33,11 +31,6 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     last_seen_time = last_event_time
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s4")
-    if total==0:
-        s4_times_.remove_json()
-    else:
-        s4_times_.view_times()
-    count_flags = False
 
     if total:
         context.log(f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
@@ -97,7 +90,6 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                         context._record_count_progress(
                             target_cycles, total, action_key="s4"
                         )
-                        count_flags = True
                     elif record_number <= 0 or occurred_time > last_seen_time:
                         last_record_number = record_number
                         last_seen_time = occurred_time
@@ -105,11 +97,6 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                         context._record_count_progress(
                             target_cycles, total, action_key="s4"
                         )
-                        count_flags = True
-            if count_flags:
-                time.sleep(1)
-                s4_times_.filter_deepsleep_events(last_event_time,total)
-                count_flags = False
 
             if total > log_num:
                 context.log(
