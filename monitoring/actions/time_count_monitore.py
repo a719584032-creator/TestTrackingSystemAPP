@@ -42,7 +42,10 @@ class S4_times(Json_Excute):
 
     def __init__(self,context,state='S4'):
         super().__init__()
-        self.max_records=50
+        if state=='S4':
+            self.max_records=50
+        else:
+            self.max_records = 10
         self.root_=get_patvs_root()
         self.state=state
         self.path_=self.root_ / f"{state}_times.json"
@@ -129,19 +132,17 @@ class S4_times(Json_Excute):
             return events
         sleep_events = []
         # 筛选条件：来源为Kernel-Power，事件ID为187（进入睡眠）
-        print(events)
         for event in events:
             if isinstance(event, dict) and datetime.strptime(event["时间"], self.time_formate) >= start_time:
                 sleep_events.append(event["时间"])
-                print(event)
                 if event["事件ID"] == 187:
                     sleep_events.append(event["时间"])
-                    self.count_times(sleep_events[-1], sleep_events[0],count)
+                    break
+        self.count_times(sleep_events[-1], sleep_events[0],count)
 
         return
 
     def filter_sleep_events(self,start_time,count=1,):
-        count=0
         events = self.read_system_events(log_name="System")
         if not isinstance(events, list):
             return events
@@ -149,12 +150,11 @@ class S4_times(Json_Excute):
         # 筛选条件：来源为Kernel-Power，事件ID为187（进入睡眠）
         for event in events:
             if isinstance(event, dict) and datetime.strptime(event["时间"], self.time_formate) >= start_time:
-                if event["事件ID"] ==566 and count<3:
-                    count+=1
+                # sleep_events.append(event["时间"])
+                if event["事件ID"] ==566 and len(sleep_events)<2:
                     sleep_events.append(event["时间"])
-        print(sleep_events)
-        self.count_times(sleep_events[-1], sleep_events[0],count)
 
+        self.count_times(sleep_events[-1], sleep_events[0],count)
         return
 
 
