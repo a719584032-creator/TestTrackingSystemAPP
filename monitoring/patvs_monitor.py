@@ -37,7 +37,10 @@ from .actions import (
     time_monitor,
     usb_monitor,
     volume_monitor,
+    s3_time_monitor,
+    s4_time_monitor
 )
+
 from config.settings import SETTINGS
 from .session_store import SessionStateStore
 
@@ -807,6 +810,7 @@ class Patvs_Fuction:
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
                     elif normalized_action.lower() == "usb插拔":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
@@ -863,6 +867,25 @@ class Patvs_Fuction:
                             target=s4_sleep_monitor.run,
                             args=(self, self.case_start_time, target_value),
                         ).start()
+
+                    elif normalized_action == "s4记时":
+                        self.log(
+                            f"开始执行监控: {action}，目标测试次数: {target_value:g}"
+                        )
+                        threading.Thread(
+                            target=s4_time_monitor.run,
+                            args=(self, self.case_start_time, target_value),
+                        ).start()
+
+                    elif normalized_action == "s3记时":
+                        self.log(
+                            f"开始执行监控: {action}，目标测试次数: {target_value:g}"
+                        )
+                        threading.Thread(
+                            target=s3_time_monitor.run,
+                            args=(self, self.case_start_time, target_value),
+                        ).start()
+
                     elif normalized_action == "s5":
                         self.log(
                             f"开始执行监控: {action}，目标测试次数: {target_value:g}"
