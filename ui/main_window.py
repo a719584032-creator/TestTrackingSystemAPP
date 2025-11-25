@@ -266,7 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 窗口参数
         self._update_window_title()
-        self.resize(1200, 680)
+        self.resize(1280, 1024)
         self.setMinimumSize(1024, 640)
         self._build_ui()
         self._apply_pending_audio_logs()

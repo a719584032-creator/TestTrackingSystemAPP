@@ -135,7 +135,7 @@ class UpdateManager:
 
         # --- 发起 HTTP 流式下载 ---
         try:
-            response = requests.get(info.download_url, stream=True, timeout=60)
+            response = requests.get(info.download_url, stream=True, timeout=60, verify=False)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - 网络依赖
             # 网络错误统一包装为 NetworkError，方便上层区分

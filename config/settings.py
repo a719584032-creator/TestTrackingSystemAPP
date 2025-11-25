@@ -9,7 +9,7 @@ from .paths import get_patvs_root
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
@@ -42,7 +42,7 @@ class OTASettings:
 class CryptoSettings:
     """时间加密 key，与后端对应"""
 
-    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")
+    result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key")
 
 
 @dataclass(slots=True)
