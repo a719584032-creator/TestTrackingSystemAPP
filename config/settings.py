@@ -43,7 +43,7 @@ class CryptoSettings:
     """时间加密 key，与后端对应"""
 
     #result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key")
-    result_time_secret: str = os.getenv("SECRET_KEY", "secret-key")
+    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")
 
 
 @dataclass(slots=True)
