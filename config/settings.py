@@ -52,14 +52,14 @@ class ClientSettings:
     api: ApiSettings = ApiSettings()
     ota: OTASettings = OTASettings()
     crypto: CryptoSettings = CryptoSettings()
-    remember_me_file: Path = PATVS_ROOT / "credentials.json"
-    ui_state_file: Path = CONFIG_DIR / "ui_state.json"
-    window_state_file: Path = CONFIG_DIR / "window_state.json"
-    monitoring_cache_file: Path = CONFIG_DIR / "monitoring_state.json"
+    remember_me_file: Path = PATVS_ROOT / "credentials.json"  # 账号密码
+    ui_state_file: Path = CONFIG_DIR / "ui_state.json"        # 记录用户选择内容
+    window_state_file: Path = CONFIG_DIR / "window_state.json"  # 记录窗口样式
+    monitoring_cache_file: Path = CONFIG_DIR / "monitoring_state.json"  # 监控动作进度记录（备份缓存）
     log_root: Path = PATVS_ROOT
-    monitoring_temp_file: Path = PATVS_ROOT / "temp_action_and_num.json"
+    monitoring_temp_file: Path = PATVS_ROOT / "temp_action_and_num.json" # 监控动作进度记录
     monitoring_encryption_key: bytes = os.getenv(
-        "MONITORING_ENCRYPTION_KEY", DEFAULT_MONITORING_ENCRYPTION_KEY
+        "MONITORING_ENCRYPTION_KEY", DEFAULT_MONITORING_ENCRYPTION_KEY   # 加密防止破解
     ).encode("utf-8")
 
 

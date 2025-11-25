@@ -1,4 +1,4 @@
-"""Qt widgets that power the main workflow window."""
+""" 测试执行客户端界面 """
 from __future__ import annotations
 
 import datetime as dt
@@ -21,6 +21,7 @@ from models import (
     Project,
     TestPlan,
 )
+from monitoring import MonitoringAction
 from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
 from monitoring.parser import MonitoringAction, parse_keywords, require_attachment
@@ -32,14 +33,7 @@ from utils.exceptions import AuthenticationError, ClientError, NetworkError, Upd
 from config.settings import APP_VERSION, SETTINGS
 
 
-STATUS_COLORS = {
-    "未开始": "#6B7280",
-    "进行中": "#10B981",
-    "挂起": "#F59E0B",
-    "已完成": "#2563EB",
-}
 
-DEFAULT_STATUS_COLOR = "#6B7280"
 
 PASS_SYMBOL_COLOR = "#16A34A"
 FAIL_SYMBOL_COLOR = "#DC2626"
@@ -64,14 +58,15 @@ RESULT_LABELS = {
 class CaseDisplayEntry:
     """Flattened representation of a plan case row for the tree view."""
 
-    case: PlanCase
-    execution: Optional[CaseExecutionResult]
-    device_label: str
-    device_model_id: Optional[int]
-    plan_device_model_id: Optional[int]
-    is_general: bool
+    case: PlanCase  # 计划用例对象
+    execution: Optional[CaseExecutionResult]  # 执行结果对象
+    device_label: str # 设备名称
+    device_model_id: Optional[int]  # 设备ID
+    plan_device_model_id: Optional[int]  # 计划中的设备ID
+    is_general: bool #是否通用用例
 
     def result_value(self) -> str:
+        # 获取最新用例结果并判断是否是通用用例
         if self.execution and self.execution.result:
             return self.execution.result.lower()
         if self.is_general and self.case.latest_result:
@@ -80,15 +75,15 @@ class CaseDisplayEntry:
 
 
 class ResultDialog(QtWidgets.QDialog):
-    """Dialog used to collect execution metadata before submitting results."""
+    """ 记录结果对话框 """
 
     def __init__(
         self,
         parent: QtWidgets.QWidget,
         result_label: str,
         case_title: str,
-        device_hint: Optional[str],
-        require_attachment: bool,
+        device_hint: Optional[str],  # 机型提示
+        require_attachment: bool,    # 是否必须上传图片
     ) -> None:
         super().__init__(parent)
         self._require_attachment = require_attachment
@@ -146,17 +141,20 @@ class ResultDialog(QtWidgets.QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-
+        # 添加图片
         self._add_attachment_btn.clicked.connect(self._add_attachment)
+        # 删除图片
         self._remove_attachment_btn.clicked.connect(self._remove_attachment)
 
     # ------------------------------------------------------------------
     def _add_attachment(self) -> None:
+        """ 添加图片附件 """
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "选择图片",
             os.path.expanduser("~"),
             "Images (*.png *.jpg *.jpeg *.bmp)",
+        #    "All Files (*)", 暂时不开放其它类型，后续更改
         )
         for path in files:
             try:
@@ -169,6 +167,7 @@ class ResultDialog(QtWidgets.QDialog):
             self._attachment_list.addItem(os.path.basename(path))
 
     def _remove_attachment(self) -> None:
+        """ 删除图片附件 """
         row = self._attachment_list.currentRow()
         if row < 0 or row >= len(self._attachments):
             return
@@ -200,8 +199,9 @@ class ResultDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    """Primary window containing the execution UI."""
-
+    """ 执行主窗口UI """
+    _current_actions: list[MonitoringAction]
+    # OTA 更新相关
     _update_prompt_signal = QtCore.pyqtSignal(object)
     _update_progress_signal = QtCore.pyqtSignal(int, object)
     _update_ready_signal = QtCore.pyqtSignal(object, object)
@@ -216,11 +216,12 @@ class MainWindow(QtWidgets.QMainWindow):
         update_manager: UpdateManager,
     ) -> None:
         super().__init__()
-        self._api = api_client
-        self._monitoring = monitoring
-        self._state_store = state_store
-        self._user = user_info
-        self._updates = update_manager
+        # 初始化所有业务需要字段，方法，对象
+        self._api = api_client  # API请求
+        self._monitoring = monitoring  # 监控管理器（负责日志解析/关键字监控）
+        self._state_store = state_store  # 窗口几何信息保存/恢复
+        self._user = user_info  # 当前登录用户信息
+        self._updates = update_manager  # OTA 更新管理器
         self._logger = logging.getLogger(__name__)
 
         self._departments: List[Department] = []
@@ -249,11 +250,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_check_thread: Optional[threading.Thread] = None
         self._update_download_thread: Optional[threading.Thread] = None
 
+        # OTA 更新
         self._update_prompt_signal.connect(self._prompt_update)
         self._update_progress_signal.connect(self._update_download_progress)
         self._update_ready_signal.connect(self._on_update_ready)
         self._update_error_signal.connect(self._handle_update_error)
 
+        # 记录UI状态
         self._state_file_path = SETTINGS.ui_state_file
         self._restore_department_id: Optional[int] = None
         self._restore_project_id: Optional[int] = None
@@ -261,6 +264,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._restore_start_clicked = False
         self.restore_state()
 
+        # 窗口参数
         self._update_window_title()
         self.resize(1200, 680)
         self.setMinimumSize(1024, 640)
@@ -269,11 +273,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_signals()
         self._restore_window_state()
 
+        # 延迟启动后台任务
         QtCore.QTimer.singleShot(100, self._load_departments)
         QtCore.QTimer.singleShot(2000, self._start_update_check)
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
+        """ 创建所有控件和布局 """
+        # 创建中心 widget + 顶层布局
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
@@ -336,6 +343,7 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.setColumnStretch(5, 1)
         root_layout.addWidget(filter_box)
 
+        # 计划总览区域
         plan_box = QtWidgets.QGroupBox("计划总览")
         plan_layout = QtWidgets.QHBoxLayout(plan_box)
         plan_layout.setSpacing(16)
@@ -358,6 +366,7 @@ class MainWindow(QtWidgets.QMainWindow):
         root_layout.addWidget(plan_box)
 
         # ------------------------------------------------------------------
+        # 用例
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
 
         # 左侧面板：筛选与用例树
@@ -602,6 +611,7 @@ class MainWindow(QtWidgets.QMainWindow):
         status.clearMessage()
 
     def _style_action_button(self, button: QtWidgets.QPushButton, color: str) -> None:
+        """ 结果按钮样式 """
         hover_color = self._tint_color(color, 1.1)
         button.setStyleSheet(
             f"""
@@ -625,6 +635,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _tint_color(color: str, factor: float) -> str:
+        """ 结果按钮样式 """
         hex_value = color.lstrip("#")
         if len(hex_value) != 6:
             return color
@@ -634,11 +645,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return f"#{r:02X}{g:02X}{b:02X}"
 
     # ------------------------------------------------------------------
+    # 执行按钮状态相关
     def _refresh_start_button_state(self) -> None:
+        # 开始执行按钮，有监控动作/执行未被锁定 才能使用
         enabled = bool(self._current_actions) and not self._execution_locked
         self._start_monitor_btn.setEnabled(enabled)
 
     def _set_action_buttons_mode(self, running: bool) -> None:
+        # 根据 running 展示 开始执行按钮 或者是 pass,fail,block 按钮
         self._start_monitor_btn.setVisible(not running)
         for button in self._result_buttons:
             button.setVisible(running)
@@ -647,6 +661,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._block_btn.setEnabled(True)
             self._update_pass_button_state()
         else:
+            # 重置状态
             self._awaiting_monitor_completion_for_pass = False
             for button in self._result_buttons:
                 button.setEnabled(False)
@@ -654,6 +669,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_start_button_state()
 
     def _update_pass_button_state(self) -> None:
+        # 根据监控是否完成来解禁 pass 按钮
         if self._awaiting_monitor_completion_for_pass:
             self._pass_btn.setEnabled(False)
             self._pass_btn.setToolTip("监控进行中，完成所有监控动作后才能标记通过")
@@ -662,6 +678,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pass_btn.setToolTip("")
 
     def _set_execution_lock(self, locked: bool) -> None:
+        # 禁用/启用 筛选区域、用例树
         if self._execution_locked == locked:
             return
         self._execution_locked = locked
@@ -680,6 +697,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_start_button_state()
 
     def _apply_pending_audio_logs(self) -> None:
+        # 判断 restore_state 是否有运行中的 audio 日志
         if self._pending_audio_logs is not None:
             self._set_audio_log_files(self._pending_audio_logs)
             self._pending_audio_logs = None
@@ -705,6 +723,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_audio_log_hint()
 
     def _update_audio_log_hint(self) -> None:
+        """ 更新显示 audio 日志文件 label"""
         label = getattr(self, "_audio_log_status", None)
         if label is None:
             return
@@ -725,6 +744,7 @@ class MainWindow(QtWidgets.QMainWindow):
             label.setToolTip(display_text)
 
     def _select_audio_logs(self) -> None:
+        """ 选择audio日志文件 """
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "选择 Lab Audio 日志文件",
@@ -737,6 +757,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _clear_audio_logs(self) -> None:
+        """ 清除audio日志 """
         if not self._audio_log_files:
             return
         self._audio_log_files = []
@@ -745,31 +766,42 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
+        # 绑定UI控件方法
         # 使用整数重载，避免 PyQt 选择字符串信号导致比较时报错
+        # 部门
         self._department_combo.currentIndexChanged[int].connect(
             self._on_department_changed
         )
+        # 项目
         self._project_combo.currentIndexChanged[int].connect(self._on_project_changed)
+        # 计划
         self._plan_combo.currentIndexChanged[int].connect(self._on_plan_changed)
+        # 模块目录
         self._directory_filter.currentIndexChanged.connect(self._apply_filters)
+        # 设备
         self._device_filter.currentIndexChanged.connect(self._apply_filters)
+        # 结果
         self._result_filter.currentIndexChanged.connect(self._apply_filters)
+        # 用例树
         self._case_tree.currentItemChanged.connect(self._on_case_selected)
-
+        # 开始执行
         self._start_monitor_btn.clicked.connect(self._start_monitoring)
+        # 选择 audio 日志
         self._select_audio_logs_btn.clicked.connect(self._select_audio_logs)
+        # 清除 audio 日志
         self._clear_audio_logs_btn.clicked.connect(self._clear_audio_logs)
-
+        # 结果按钮
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
         self._block_btn.clicked.connect(lambda: self._submit_result("block"))
-
+        # 监控信号
         self._monitoring.log_generated.connect(self._append_log)
         self._monitoring.monitoring_finished.connect(self._on_monitoring_finished)
         self._monitoring.monitoring_error.connect(self._on_monitoring_error)
 
     # ------------------------------------------------------------------
     def _restore_window_state(self) -> None:
+        """ 窗口恢复 """
         geometry, state = self._state_store.load()
         if geometry:
             self.restoreGeometry(geometry)
@@ -777,11 +809,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.restoreState(state)
 
     def _current_user_display_name(self) -> str:
+        """ 获取登录用户名 """
         if not isinstance(self._user, dict):
             return "未登录"
-        return str(self._user.get("real_name") or self._user.get("username") or "未登录")
+        return str(self._user.get("username") or "未登录")
 
     def _update_window_title(self) -> None:
+        """ 客户端标题 """
         base_title = f"TTS测试执行客户端 v{APP_VERSION}"
         user_name = self._current_user_display_name()
         if user_name:
@@ -790,6 +824,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setWindowTitle(base_title)
 
     def _state_username(self) -> str:
+        """ 用户名 """
         if not isinstance(self._user, dict):
             return ""
         for key in ("username", "account", "user_name"):
@@ -800,6 +835,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _int_or_none(value: object) -> Optional[int]:
+        """ 数据类型转换辅助 """
         if value is None or value == "":
             return None
         try:
@@ -808,6 +844,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
 
     def _load_state_payload(self) -> Dict[str, object]:
+        """ 读取保存的请求参数，用于窗口回放 """
         username = self._state_username()
         if not username:
             return {}
@@ -815,6 +852,7 @@ class MainWindow(QtWidgets.QMainWindow):
             with self._state_file_path.open("r", encoding="utf-8") as state_file:
                 payload = json.load(state_file)
         except FileNotFoundError:
+            self._logger.error("文件不存在")
             return {}
         except Exception as exc:  # pragma: no cover - 状态文件清理难以覆盖
             self._logger.error("读取状态文件失败: %s", exc)
@@ -830,6 +868,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return payload
 
     def restore_state(self) -> None:
+        """ 上一次窗口选项的记录回放"""
         state = self._load_state_payload()
         if not state:
             self._pending_filter_state = None
@@ -840,7 +879,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._restore_start_clicked = False
             self._pending_audio_logs = None
             return
-
+        # 上一次的筛选项
         self._restore_department_id = self._int_or_none(state.get("department_id"))
         self._restore_project_id = self._int_or_none(state.get("project_id"))
         self._restore_plan_id = self._int_or_none(state.get("plan_id"))
@@ -854,7 +893,7 @@ class MainWindow(QtWidgets.QMainWindow):
             }
         else:
             self._pending_filter_state = None
-
+        # 上一次选中的用例树节点
         selection = state.get("selection")
         if (
             isinstance(selection, (list, tuple))
@@ -872,9 +911,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._pending_selection = None
         else:
             self._pending_selection = None
-
+        # 是否在执行中
         self._restore_start_clicked = bool(state.get("start_clicked"))
-
+        # 是否有 audio 日志
         audio_logs = state.get("audio_logs")
         if isinstance(audio_logs, list):
             self._pending_audio_logs = [str(path) for path in audio_logs if path]
@@ -882,6 +921,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pending_audio_logs = None
 
     def save_state(self) -> None:
+        """ 保存当前用户的所有筛选条件，是否在执行 """
         username = self._state_username()
         if not username:
             return
@@ -913,9 +953,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _append_log(self, message: str) -> None:
+        """ 追加日志信息 """
         self._log_view.appendPlainText(message)
 
     def _on_monitoring_finished(self) -> None:
+        """ 监控完成，解禁pass按钮 """
         self._append_log("监控已结束")
         if self._awaiting_monitor_completion_for_pass:
             self._awaiting_monitor_completion_for_pass = False
@@ -924,6 +966,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_monitoring_error(self, message: str) -> None:
+        """ 监控错误处理 """
         QtWidgets.QMessageBox.critical(self, "监控失败", message)
         self._set_action_buttons_mode(False)
         self._set_execution_lock(False)
@@ -931,6 +974,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _clear_project_combo(self) -> None:
+        """  清空项目选项 """
         with QtCore.QSignalBlocker(self._project_combo):
             self._project_combo.clear()
             self._project_combo.addItem("请选择项目", None)
@@ -938,6 +982,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._project_combo.setEnabled(bool(self._projects))
 
     def _clear_plan_combo(self) -> None:
+        """  清空计划选项 """
         with QtCore.QSignalBlocker(self._plan_combo):
             self._plan_combo.clear()
             self._plan_combo.addItem("请选择计划", None)
@@ -949,6 +994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_plan_combo()
 
     def _populate_project_combo(self) -> None:
+        """ 选择项目 """
         self._clear_project_combo()
         if not self._projects:
             self._restore_project_id = None
@@ -973,6 +1019,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._project_combo.setCurrentIndex(target_index)
 
     def _populate_plan_combo(self) -> None:
+        """ 选择计划 """
         self._clear_plan_combo()
         if not self._plans:
             self._restore_plan_id = None
@@ -996,6 +1043,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _load_departments(self) -> None:
+        """ 获取部门信息 """
         try:
             self._departments = self._api.get_departments()
         except AuthenticationError:
@@ -1013,6 +1061,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._department_combo.setEnabled(bool(self._departments))
         target_index = 0
+        # 如果有保存部门ID，恢复上一次的选择
         if self._restore_department_id is not None:
             restored_index = self._department_combo.findData(self._restore_department_id)
             if restored_index >= 0:
@@ -1026,6 +1075,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_department_changed(self, _index: object) -> None:
+        """ 联动筛选框，部门改变时重新获取项目 """
         dept_id = self._int_or_none(self._department_combo.currentData())
         if dept_id is None:
             self._projects = []
@@ -1061,6 +1111,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_project_changed(self, _index: object) -> None:
+        """ 联动筛选框，项目改变时重新获取计划 """
         project_id = self._int_or_none(self._project_combo.currentData())
         dept_id = self._int_or_none(self._department_combo.currentData())
         if project_id is None:
@@ -1103,6 +1154,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _on_plan_changed(self, _index: object) -> None:
+        """ 联动筛选框，计划改变时重新获取用例 """
         plan_id = self._int_or_none(self._plan_combo.currentData())
         if plan_id is None:
             self._pending_filter_state = None
@@ -1156,7 +1208,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _refresh_device_filter(self) -> None:
+        """ 设备过滤筛选 """
         devices: Dict[int, str] = {}
+        # 从所有case中提取设备ID和名称
         for case in self._cases:
             for model in case.device_models:
                 if getattr(model, "id", None) is None:
@@ -1185,8 +1239,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_filter.setCurrentIndex(0)
 
     def _refresh_directory_filter(self) -> None:
+        """ 模块目录过滤筛选 """
         directories: List[str] = []
         seen: set[str] = set()
+        # 从所有用例中提取模块目录
         for case in self._cases:
             directory = self._normalize_directory(case.group_path)
             if directory not in seen:
@@ -1204,6 +1260,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_combobox_current_data(
         self, combo: QtWidgets.QComboBox, value: object
     ) -> None:
+        """ 工具方法，根据 item 的 itemData 设定当前 index。 """
         combo.blockSignals(True)
         try:
             target_index = None
@@ -1222,6 +1279,7 @@ class MainWindow(QtWidgets.QMainWindow):
             combo.blockSignals(False)
 
     def _restore_pending_filters(self) -> None:
+        """ 恢复目录/设备/结果三个组合框的当前值。 """
         if not self._pending_filter_state:
             return
         state = self._pending_filter_state
@@ -1238,6 +1296,7 @@ class MainWindow(QtWidgets.QMainWindow):
         model_code: Optional[str],
         device_id: Optional[int],
     ) -> str:
+        """ 格式话设备显示 """
         if name:
             return name
         if model_code:
@@ -1251,6 +1310,7 @@ class MainWindow(QtWidgets.QMainWindow):
         executions: Sequence[CaseExecutionResult],
         device_id: Optional[int],
     ) -> Optional[CaseExecutionResult]:
+        """ 获取指定机型最新执行结果 """
         candidates = [
             execution
             for execution in executions
@@ -1258,9 +1318,17 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
         if not candidates:
             return None
+        # executed_at最大的就是最新的结果
         return max(candidates, key=lambda item: item.executed_at or "")
 
     def _build_case_entries(self, case: PlanCase) -> List[CaseDisplayEntry]:
+        """
+        核心：一个 case 可能对应多个“执行设备”的行（一个 case + 多机型，树里每个 entry 一行）
+        逻辑：
+        先用 case.device_models 生成 entries（每个设备一条）
+        再补充那些虽然不在 device_models，但 execution_results 里出现过的“额外设备”
+        如果完全没设备信息，就生成一个 “通用” entry（is_general=True）。
+        """
         entries: List[CaseDisplayEntry] = []
         executions = case.execution_results or []
         device_models = {
@@ -1343,6 +1411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return entries
 
     def _apply_filters(self) -> None:
+        """ 应用筛选：目录、设备、结果过滤用例 """
         directory_value = self._directory_filter.currentData()
         device_value = self._device_filter.currentData()
         result_value = self._result_filter.currentData()
@@ -1375,6 +1444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
 
     def _update_plan_summary(self) -> None:
+        """ 更新计划进度统计 """
         detail = self._plan_detail
         if not detail:
             self._plan_period_label.setText("执行时间：—")
@@ -1424,6 +1494,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def _refresh_case_tree(self) -> None:
+        """ 刷新节点树 """
         self._case_tree.blockSignals(True)
         self._case_tree.clear()
         if not self._filtered_entries:
@@ -1482,6 +1553,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._select_first_case()
 
     def _select_first_case(self) -> None:
+        """ 选择某个节点 """
         root = self._case_tree.invisibleRootItem()
 
         def find_case(node: QtWidgets.QTreeWidgetItem) -> Optional[QtWidgets.QTreeWidgetItem]:
@@ -1501,18 +1573,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_case_detail(None)
 
     def _normalize_directory(self, path: Optional[str]) -> str:
+        """ 模块分组筛选 """
         if not path:
             return "未分组"
+        # 根目录root不显示
         parts = [part.strip() for part in str(path).split("/") if part and part.lower() != "root"]
         return "/".join(parts) if parts else "未分组"
 
     def _directory_tokens(self, path: Optional[str]) -> List[str]:
+        """ 拆成 tokens 用于构建树的层级 """
         normalized = self._normalize_directory(path)
         if normalized == "未分组":
             return ["未分组"]
         return normalized.split("/")
 
     def _status_color(self, entry: CaseDisplayEntry) -> Optional[str]:
+        """ 用例状态颜色设置 """
         result = entry.result_value()
         if result == "pass":
             return PASS_SYMBOL_COLOR
@@ -1523,6 +1599,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return None
 
     def _status_icon(self, entry: CaseDisplayEntry) -> Optional[QtGui.QIcon]:
+        """ 用例状态图标 """
         mapping = {
             "pass": "pass",
             "fail": "fail",
@@ -1547,6 +1624,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return pixmap
 
     def _create_status_pixmap(self, key: str) -> QtGui.QPixmap:
+        """ 创建用例状态图标 """
         size = STATUS_ICON_SIZE
         pixmap = QtGui.QPixmap(size, size)
         pixmap.fill(QtCore.Qt.transparent)
@@ -1611,6 +1689,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _selection_key(
         self, entry: Optional[CaseDisplayEntry]
     ) -> Optional[Tuple[int, Optional[int], Optional[int], bool]]:
+        """ 选中用例 key / 展示文本 / 用例选中事件，记录元组 """
         if not entry:
             return None
         case_identifier: Optional[int] = None
@@ -1629,6 +1708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return (case_identifier, device_id, plan_device_id, entry.is_general)
 
     def _case_display_text(self, entry: CaseDisplayEntry) -> str:
+        """ 展示标题 + 机型 + 关键字 """
         case = entry.case
         parts: List[str] = []
         title = (case.title or "").strip() or f"用例 {case.case_id}"
@@ -1647,12 +1727,14 @@ class MainWindow(QtWidgets.QMainWindow):
         previous: Optional[QtWidgets.QTreeWidgetItem],
     ) -> None:
         entry = current.data(0, QtCore.Qt.UserRole) if current else None
+        # 如果 current 没有 entry 数据,保持 previous 选中，否则清空详情
         if not entry:
             if previous and previous.data(0, QtCore.Qt.UserRole):
                 self._case_tree.setCurrentItem(previous)
             else:
                 self._update_case_detail(None)
             return
+        # 记录选中的ID，并更新用例详情。根据是否点击来决定调用开始执行
         case = entry.case
         self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
         self._update_case_detail(entry)
@@ -1663,6 +1745,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(0, self._start_monitoring)
 
     def _update_case_detail(self, entry: Optional[CaseDisplayEntry]) -> None:
+        """ 用例详情展示 """
         self._current_entry = entry
         case = entry.case if entry else None
         self._current_case = case
@@ -1739,6 +1822,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _requires_audio_logs(self) -> bool:
+        # 判断是否有 audio 动作
         for action in self._current_actions:
             if action.normalized_name in AUDIO_EVENT_KEYWORDS:
                 return True
@@ -1746,6 +1830,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
+        """ 开始执行 """
         try:
             if not self._current_case:
                 QtWidgets.QMessageBox.information(self, "未选择", "请先选择用例")
@@ -1792,6 +1877,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._auto_start_in_progress = False
 
     def _existing_result_label(self, entry: CaseDisplayEntry) -> Optional[str]:
+        """ 判断用例是否已有结果 """
         result: Optional[str] = None
         if entry.execution and entry.execution.result:
             result = entry.execution.result
@@ -1805,6 +1891,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _resolve_submission_device(
         self, entry: CaseDisplayEntry
     ) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+        """ 提交设备 """
         device_model_id = entry.device_model_id
         plan_device_model_id = entry.plan_device_model_id
         hint_text: Optional[str] = None
@@ -1819,6 +1906,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return device_model_id, plan_device_model_id, hint_text
 
     def _submit_result(self, result: str) -> None:
+        """ 更新结果 """
         if not self._current_case:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
             return
@@ -1906,6 +1994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_action_buttons_mode(False)
 
     def _reload_current_plan(self) -> None:
+        """ 计划重载 """
         self._pending_selection = self._selection_key(self._current_entry)
         plan_id = self._int_or_none(self._plan_combo.currentData())
         if plan_id is not None:
@@ -1920,7 +2009,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._pending_filter_state = None
 
     # ------------------------------------------------------------------
-    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 - Qt 事件钩子名称固定
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """ 关闭窗口并记录状态 """
+        # noqa: N802 - Qt 事件钩子名称固定
         self.save_state()
         geometry = self.saveGeometry()
         state = self.saveState()

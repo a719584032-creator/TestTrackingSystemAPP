@@ -1,4 +1,4 @@
-"""Persists lightweight UI state such as window geometry."""
+"""持久化一些轻量的 UI 状态.窗口位置、大小"""
 from __future__ import annotations
 
 from typing import Optional
@@ -10,7 +10,7 @@ from utils.storage import load_json, save_json
 
 
 class WindowStateStore:
-    """Stores and restores main window geometry."""
+    """保存和恢复窗口样式"""
 
     def __init__(self) -> None:
         self._path = SETTINGS.window_state_file
