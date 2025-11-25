@@ -20,8 +20,8 @@ DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4
 class ApiSettings:
     """API 设置"""
 
-    base_url: str = "https://patvs.lenovo.com/api"
-    #base_url: str = "http://10.184.46.54:5173/api"
+    #base_url: str = "https://patvs.lenovo.com/api"
+    base_url: str = "http://10.184.46.54:5173/api"
     #base_url: str = "http://172.28.79.247:5173/api"
 
     timeout: int = 60
@@ -42,7 +42,8 @@ class OTASettings:
 class CryptoSettings:
     """时间加密 key，与后端对应"""
 
-    result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key")
+    #result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key")
+    result_time_secret: str = os.getenv("SECRET_KEY", "secret-key")
 
 
 @dataclass(slots=True)

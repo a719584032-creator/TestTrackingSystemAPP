@@ -1,4 +1,4 @@
-"""Utilities for parsing monitoring keywords into actionable tasks."""
+"""将监控关键字解析成可执行的监控动作。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,29 +9,30 @@ from .audio_event_constants import EVENT_SPECS
 
 
 def _normalize(value: str) -> str:
-    """Return an action token normalized for lookups."""
+    """规范化动作 token，便于查找。"""
 
     return value.strip().lower().replace(" ", "")
 
-
+# 实例创建后不可变
 @dataclass(frozen=True)
 class MonitoringAction:
-    """Represents a monitoring task such as ``S3+5`` or ``S3+USB+5``."""
+    """ 用例关键字，例如 ``S3+5`` 或 ``S3+USB+5``。"""
 
     name: str
     amount: float
     components: Tuple[str, ...] = ()
     raw: str | None = None
-
+    # 强制 components 元组类型
     def __post_init__(self) -> None:
         object.__setattr__(self, "components", tuple(self.components or ()))
 
     @property
     def normalized_name(self) -> str:
+        """ 规范格式化后的关键字 """
         return _normalize(self.name)
 
     def display_label(self) -> str:
-        """Return a human friendly label including component breakdown."""
+        """返回包含组件拆解的可读标签。"""
 
         if self.components:
             components = tuple(part for part in self.components if part)
@@ -48,7 +49,7 @@ class MonitoringAction:
 
 @dataclass(frozen=True)
 class _ActionDefinition:
-    """Canonical description for a supported monitoring action."""
+    """支持的监控动作的规范描述。"""
 
     name: str
     components: Tuple[str, ...] = ()
@@ -80,9 +81,11 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("Camera"),
 )
 
+# 常规动作映射：规范化名称 -> 动作定义
 _ACTION_LOOKUP = {_normalize(defn.name): defn for defn in _ACTION_DEFINITIONS}
 _AUDIO_ACTION_LOOKUP = {}
 for _name, _spec in EVENT_SPECS.items():
+    # 音频事件动作：用事件描述填充组件，供 UI 展示
     normalized = _normalize(_name)
     description = (_spec.get("description") or "").strip()
     components: Tuple[str, ...] = (description,) if description else ()
@@ -125,11 +128,10 @@ def _resolve_audio_action(parts: Sequence[str]) -> Tuple[_ActionDefinition | Non
 
 
 def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
-    """Parse keyword tokens into monitoring actions.
+    """将关键字 token 转换为监控动作。
 
-    The parser expects tokens with the format ``action+number`` and can also resolve
-    multi-step combinations such as ``S3+USB+5``. If parsing or validation fails,
-    a :class:`ValidationError` is raised listing the problematic tokens.
+    期望格式为 ``动作+次数``，也支持多步骤组合如 ``S3+USB+5``。
+    解析或校验失败会抛出 :class:`ValidationError`，并告知问题 token。
     """
 
     actions: List[MonitoringAction] = []
@@ -140,6 +142,7 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
         token = token.strip()
         if not token:
             continue
+        # 按 “+” 切分：前半部是动作组合，末尾是次数
         parts = [part.strip() for part in token.split("+") if part.strip()]
         if len(parts) < 2:
             format_errors.append(token)
@@ -158,6 +161,7 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
         if definition is None:
             unsupported.append("+".join(action_parts))
             continue
+        # 保留原始 token 方便错误提示或展示
         actions.append(
             MonitoringAction(
                 name=definition.name,
@@ -186,7 +190,7 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
 
 
 def require_attachment(actions: Iterable[MonitoringAction]) -> bool:
-    """Return ``True`` if any action requires screenshot evidence."""
+    """是否需要附件：时间类动作需强制上传截图。"""
 
     for action in actions:
         if "时间" in action.name or action.normalized_name == _normalize("时间"):
