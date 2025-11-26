@@ -175,7 +175,7 @@ class PlanExecutionRun:
 
 @dataclass(slots=True)
 class PlanDetail:
-    """Detailed information for a selected test plan."""
+    """选中测试计划的详细信息。"""
 
     id: int
     name: str
@@ -244,6 +244,7 @@ class CaseExecutionResult:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "CaseExecutionResult":
         device_payload = payload.get("device_model") or {}
+        # 部分响应只带设备 ID/名称，需补齐成标准字段结构
         if not device_payload and payload.get("device_model_id"):
             device_payload = {
                 "id": payload.get("device_model_id"),
@@ -302,7 +303,7 @@ class CaseStep:
 
 @dataclass(slots=True)
 class PlanCase:
-    """Model for the `/test-plans/{plan}/cases` endpoint."""
+    """`/test-plans/{plan}/cases` 接口返回的用例模型。"""
 
     id: int
     case_id: int
@@ -348,7 +349,7 @@ class PlanCase:
         )
 
     def keyword_actions(self) -> List[str]:
-        """Return a sanitized list of keyword tokens."""
+        """返回过滤后的关键字 token 列表。"""
 
         return [
             token
@@ -357,13 +358,14 @@ class PlanCase:
         ]
 
     def keyword_tokens(self) -> List[str]:
-        """Return flattened keyword tokens for display and parsing."""
+        """返回用于展示/解析的扁平化关键字 token。"""
 
         tokens: List[str] = []
         splitter = re.compile(r"[\s,;，；]+")
         for raw in self.keywords:
             if not raw:
                 continue
+            # 同一字段可能包含多个关键字，按空白/逗号/分号切分
             if isinstance(raw, str):
                 parts = splitter.split(raw.strip())
             else:  # pragma: no cover - 防御性分支
@@ -375,7 +377,7 @@ class PlanCase:
         return tokens
 
     def display_keywords(self) -> str:
-        """Return keywords formatted for UI display."""
+        """格式化关键字供 UI 展示。"""
 
         return " ".join(self.keyword_tokens())
 
@@ -384,6 +386,7 @@ def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
     seen: dict[int, DeviceModel] = {}
     for exec_result in payload.get("execution_results", []):
         device_payload = exec_result.get("device_model") or {}
+        # 执行结果中的设备信息优先补齐，避免丢失历史关联机型
         if not device_payload and exec_result.get("device_model_id"):
             device_payload = {
                 "id": exec_result.get("device_model_id"),
@@ -397,5 +400,6 @@ def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
         seen[model.id] = model
     for device_payload in payload.get("device_models", []):
         model = DeviceModel.from_dict(device_payload)
+        # 合并来自计划/执行记录的机型列表，后写入的覆盖前者
         seen[model.id] = model
     return list(seen.values())
