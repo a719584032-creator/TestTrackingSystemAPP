@@ -78,6 +78,15 @@ class ParseKeywordsTests(unittest.TestCase):
 
         self.assertIn("不支持", str(exc_info.exception))
 
+    def test_hdmi_hotplug_keyword_supported(self):
+        actions = parse_keywords(["显示器插拔+2"])
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.name, "显示器插拔")
+        self.assertEqual(action.amount, 2.0)
+        self.assertEqual(action.normalized_name, "显示器插拔")
+
 
 if __name__ == "__main__":  # pragma: no cover - 仅用于本地调试执行
     unittest.main()

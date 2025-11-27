@@ -21,6 +21,7 @@ from .qt_compat import wx
 from .actions import (
     audio_event_monitor,
     camera_monitor,
+    hdmi_monitor,
     display_monitor,
     keyboard_any_monitor,
     lock_screen_monitor,
@@ -831,6 +832,13 @@ class Patvs_Fuction:
                         self.log(f"开始执行监控: {action} 开关事件，目标测试次数: {target_value:g}")
                         threading.Thread(
                             target=display_monitor.run,
+                            args=(self, target_value),
+                            kwargs={"remaining_cycles": remaining_value_float},
+                        ).start()
+                    elif normalized_action == "显示器插拔":
+                        self.log(f"开始执行监控: {action} 插拔事件，目标测试次数: {target_value:g}")
+                        threading.Thread(
+                            target=hdmi_monitor.run,
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()

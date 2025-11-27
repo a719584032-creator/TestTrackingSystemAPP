@@ -76,6 +76,7 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("S3 插拔", components=("S3 睡眠", "USB 插拔")),
     _ActionDefinition("S3 电源插拔", components=("S3 睡眠", "电源插拔")),
     _ActionDefinition("显示器"),
+    _ActionDefinition("显示器插拔"),
     _ActionDefinition("音量"),
     _ActionDefinition("摄像头"),
     _ActionDefinition("Camera"),
@@ -96,6 +97,9 @@ ACTION_ALIASES = {
     _normalize("s3usb"): _normalize("S3 插拔"),
     _normalize("s3+电源插拔"): _normalize("S3 电源插拔"),
     _normalize("time"): _normalize("时间"),
+    _normalize("hdmi"): _normalize("显示器插拔"),
+    _normalize("hdmi插拔"): _normalize("显示器插拔"),
+    _normalize("displayhotplug"): _normalize("显示器插拔"),
 }
 
 SUPPORTED_ACTIONS = {definition.name for definition in _ACTION_DEFINITIONS}

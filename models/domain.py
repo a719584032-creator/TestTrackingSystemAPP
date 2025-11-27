@@ -1,4 +1,4 @@
-"""服务端数据模型请求"""
+"""服务端数据模型参数"""
 from __future__ import annotations
 
 import re
@@ -383,6 +383,7 @@ class PlanCase:
 
 
 def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
+    """ 获取计划所有机型（去重归一） """
     seen: dict[int, DeviceModel] = {}
     for exec_result in payload.get("execution_results", []):
         device_payload = exec_result.get("device_model") or {}

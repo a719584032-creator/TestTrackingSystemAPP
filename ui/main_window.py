@@ -56,7 +56,7 @@ RESULT_LABELS = {
 
 @dataclass(slots=True)
 class CaseDisplayEntry:
-    """Flattened representation of a plan case row for the tree view."""
+    """ 展示/筛选“用例”最新结果 """
 
     case: PlanCase  # 计划用例对象
     execution: Optional[CaseExecutionResult]  # 执行结果对象
