@@ -1,4 +1,4 @@
-"""Qt friendly wrapper around the legacy monitoring implementation."""
+"""Qt 监控管理封装 """
 from __future__ import annotations
 
 import logging
@@ -12,7 +12,7 @@ from .parser import MonitoringAction
 
 
 class MonitoringManager(QtCore.QObject):
-    """Starts and stops hardware monitoring workflows."""
+    """负责启动和停止硬件监控流程的 Qt 对象。"""
 
     log_generated = QtCore.pyqtSignal(str)
     monitoring_finished = QtCore.pyqtSignal()
@@ -22,7 +22,7 @@ class MonitoringManager(QtCore.QObject):
         super().__init__()
         self._worker: Patvs_Fuction | None = None
         self._thread: threading.Thread | None = None
-        self._thread_done = threading.Event()
+        self._thread_done = threading.Event()  # 标记后台监控线程是否已完整退出
         self._thread_join_timeout = 3.0
         self._logger = logging.getLogger(__name__)
         # 该事件用于确保 _stop_worker 只执行一次，避免多线程重复清理
@@ -33,6 +33,7 @@ class MonitoringManager(QtCore.QObject):
         return self._thread is not None and self._thread.is_alive()
 
     def stop(self) -> None:
+        # 已经被清理或未启动则直接返回，避免多余操作
         if self._worker is None:
             return
         self._signal_worker_stop()
@@ -50,7 +51,7 @@ class MonitoringManager(QtCore.QObject):
                 self.monitoring_error.emit("监控线程退出超时，系统已强制释放监控资源")
 
     def _signal_worker_stop(self) -> None:
-        """向遗留监控逻辑发出退出信号，解除所有 wait。"""
+        """向遗留监控逻辑发出退出信号，解除所有等待。"""
 
         worker = self._worker
         if worker is None:
@@ -61,7 +62,7 @@ class MonitoringManager(QtCore.QObject):
         worker.action_complete.set()
 
     def discard_session_state(self) -> None:
-        """Clear any persisted monitoring progress for the active worker."""
+        """清理当前监控任务的持久化进度。"""
 
         worker = self._worker
         if worker is not None:
@@ -77,10 +78,12 @@ class MonitoringManager(QtCore.QObject):
         *,
         audio_log_files: Sequence[str] | None = None,
     ) -> None:
+        # 同一时间只允许一个监控任务运行
         if self.is_running():
             self.monitoring_error.emit("已有监控任务正在执行，请先停止当前任务")
             return
 
+        # 将解析后的动作转换为遗留接口需要的元组形式
         legacy_actions: Tuple[Tuple[str, float], ...] = tuple((a.name, a.amount) for a in actions)
 
         adapter = _WindowAdapter(self)
@@ -97,8 +100,10 @@ class MonitoringManager(QtCore.QObject):
             finally:
                 self._stop_worker()
 
+        # 启动前先重置线程完成标志，确保等待逻辑可用
         self._thread_done.clear()
         self._thread = threading.Thread(target=run_monitor, daemon=True, name="MonitoringWorker")
+        # 后台线程启动后，界面主线程可继续响应用户操作
         self._thread.start()
 
     # ------------------------------------------------------------------
@@ -112,6 +117,7 @@ class MonitoringManager(QtCore.QObject):
             self._signal_worker_stop()
             worker = self._worker
             thread = self._thread
+            # 清空引用以便后续重新创建监控任务
             self._worker = None
             self._thread = None
 
@@ -133,7 +139,7 @@ class MonitoringManager(QtCore.QObject):
 
 
 class _WindowAdapter:
-    """Bridge object that maps legacy callbacks to Qt signals."""
+    """将遗留回调桥接到 Qt 信号的适配器。"""
 
     def __init__(self, manager: MonitoringManager) -> None:
         self._manager = manager

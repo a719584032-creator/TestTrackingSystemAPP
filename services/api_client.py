@@ -1,4 +1,4 @@
-"""HTTP client responsible for interacting with the TTS backend."""
+"""与 TTS 后端交互的 HTTP 接口封装。"""
 from __future__ import annotations
 
 import base64
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ApiClient:
-    """Simple wrapper around the REST endpoints exposed by TTS."""
+    """ TTS 后端 REST 接口封装 """
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[int] = None):
         client_settings = SETTINGS
@@ -32,7 +32,7 @@ class ApiClient:
     # 认证相关辅助方法
     # ------------------------------------------------------------------
     def authenticate(self, username: str, password: str) -> Dict[str, any]:
-        """Authenticate ``username`` using the login endpoint."""
+        """调用登录接口完成用户名密码认证。"""
 
         response = self._request(
             "POST",
@@ -44,7 +44,7 @@ class ApiClient:
         token = data.get("token")
         if not token:
             raise AuthenticationError("登录响应缺少 token")
-        self._token = token
+        self._token = token  # 登录成功后缓存 token，供后续请求携带
         return data
 
     def set_token(self, token: Optional[str]) -> None:
@@ -102,6 +102,7 @@ class ApiClient:
         execution_start_time: str,
         execution_end_time: str,
     ) -> Dict[str, any]:
+        # 后端要求带上加密后的开始/结束时间
         if not execution_start_time or not execution_end_time:
             raise ValueError("执行结果开始/结束时间不能为空")
         body: Dict[str, any] = {
@@ -146,6 +147,7 @@ class ApiClient:
 
     # ------------------------------------------------------------------
     def _submission_payload_for_logging(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """附件字段仅保留概要，避免日志体积过大。"""
         sanitized: Dict[str, Any] = {}
         for key, value in payload.items():
             if key == "attachments" and value:
@@ -182,6 +184,7 @@ class ApiClient:
             raise ValueError("执行结果时间不能为空")
         if not self._time_secret:
             raise ValueError("提交结果密钥未配置，请联系管理员")
+        # 时间戳采用后端约定的加密方式，防止被篡改
         return encode_timestamp_token(value, self._time_secret)
 
     # ------------------------------------------------------------------
@@ -190,12 +193,13 @@ class ApiClient:
     def _headers(self, auth_request: bool = False) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
         if not auth_request and self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
+            headers["Authorization"] = f"Bearer {self._token}"  # 业务请求统一带上 token
         return headers
 
     def _request(self, method: str, path: str, *, params=None, json=None, auth_request: bool = False):
         url = f"{self.base_url}{path}"
         try:
+            # 统一入口发起 HTTP 请求，便于处理超时和 SSL 校验
             response = requests.request(
                 method,
                 url,
@@ -210,6 +214,7 @@ class ApiClient:
             raise NetworkError(str(exc)) from exc
 
         try:
+            # 后端约定返回 JSON，无法解析则视为错误响应
             payload = response.json()
         except ValueError as exc:  # pragma: no cover - 防御性兜底
             logger.exception("Non JSON response from %s", url)
@@ -224,7 +229,7 @@ class ApiClient:
 
 
 def encode_attachment(path: str) -> Dict[str, str]:
-    """Read *path* and return an API compatible attachment payload."""
+    """读取文件并返回接口可接受的附件 payload。"""
 
     with open(path, "rb") as handle:
         binary = handle.read()

@@ -1,4 +1,4 @@
-"""OTA update helpers for the desktop client."""
+""" OTA 更新辅助模块 """
 from __future__ import annotations
 
 import logging
@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class UpdateInfo:
-    version: str
-    release_notes: str
-    download_url: str
-    checksum: str = ""
+    version: str  # 版本号
+    release_notes: str  # 发布说明
+    download_url: str  # 下载地址
+    checksum: str = ""  # 文件校验和
 
 
 class OTAUpdater:
-    """Queries the OTA manifest and exposes update metadata."""
+    """ 更新信息参数 """
 
     def __init__(self) -> None:
         self._settings = SETTINGS.ota
@@ -32,6 +32,7 @@ class OTAUpdater:
         self._origin: str | None = None
 
     def check(self) -> Optional[UpdateInfo]:
+        """ 检查更新 """
         url = urljoin(self._server_origin(), "/api/ota/latest")
         try:
             response = requests.get(url, timeout=self._api_settings.timeout, verify=False)
@@ -53,6 +54,7 @@ class OTAUpdater:
         )
 
     def _server_origin(self) -> str:
+        """ 获取服务器源地址，OTA是单独的流程，不和models放一起 """
         if self._origin:
             return self._origin
 
@@ -63,11 +65,11 @@ class OTAUpdater:
         raise NetworkError("API base URL 配置无效，无法构建 OTA 接口。")
 
     def _extract_manifest(self, payload: Any) -> dict[str, Any] | None:
+        """ 获取更新清单 """
         if not isinstance(payload, dict):
             logger.warning("Unexpected OTA payload: %s", payload)
             return None
 
-        # 新接口：{"code": 200, "data": {...}}
         if "data" in payload:
             code = payload.get("code", 200)
             if code != 200:
@@ -80,16 +82,13 @@ class OTAUpdater:
             logger.warning("OTA payload data is not a dict: %s", data)
             return None
 
-        # 兼容旧格式：直接返回 manifest 内容
-        return payload
-
     def _resolve_download_url(self, url: str) -> str:
+        """ 校验下载地址 """
         if not url:
-            return ""
+            raise NetworkError("OTA 清单缺少下载链接。")
 
         parsed = urlparse(url)
         if parsed.scheme and parsed.netloc:
             return url
 
-        normalized = url if url.startswith("/") else f"/{url}"
-        return urljoin(self._server_origin(), normalized)
+        raise NetworkError("OTA 清单下载链接无效，请联系管理员。")

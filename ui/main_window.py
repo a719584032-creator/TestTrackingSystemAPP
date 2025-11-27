@@ -1803,6 +1803,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._keyword_list.clear()
         try:
+            # 解析用例关键字
             actions = parse_keywords(case.keyword_actions())
         except ValidationError as exc:
             self._keyword_error.setText(str(exc))

@@ -17,7 +17,7 @@ def run(
     key_name: Optional[str] = None,
     remaining_cycles: float | None = None,
 ) -> None:
-    """监听特定按键，达到目标次数后退出，支持断点续跑。"""
+    """单键监控入口（已退化为任意键统计，兼容历史调用），支持断点续跑。"""
 
     try:
         total_target = float(target_cycles)
@@ -38,9 +38,11 @@ def run(
     remaining = max(0.0, min(total_target, remaining))
 
     key_count = max(0.0, total_target - remaining)
-    key = context.KEY_MAPPING.get(key_name.lower()) if key_name else None
     listener_stopped = threading.Event()
-    expected_keys = {key_name} if key_name else {"键盘按键"}
+    expected_keys = {"键盘按键"}
+
+    if key_name:
+        context.log(f"单键监控已关闭，改为统计任意键。原始目标键: {key_name}")
 
     if key_count > 0:
         context.log(
@@ -49,12 +51,11 @@ def run(
 
     def on_press(pressed_key):
         nonlocal key_count
-        if key is None or pressed_key == key:
-            key_count += 1
-            context.log(f"Key pressed: {pressed_key}. Total count: {key_count}")
-            context.record_count_progress_if_current(
-                total_target, key_count, expected_keys=expected_keys
-            )
+        key_count += 1
+        context.log(f"Key pressed: {pressed_key}. Total count: {key_count}")
+        context.record_count_progress_if_current(
+            total_target, key_count, expected_keys=expected_keys
+        )
         if key_count >= total_target:
             context.log("Reached target keystroke count. Exiting...")
             listener_stopped.set()

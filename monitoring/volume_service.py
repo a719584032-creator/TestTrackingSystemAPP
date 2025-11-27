@@ -1,4 +1,4 @@
-"""Shared volume endpoint access that hides COM lifecycle details."""
+"""封装音量获取方法，屏蔽 COM 生命周期细节。"""
 from __future__ import annotations
 
 import atexit
@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 
 
 class VolumeEndpointService:
-    """Runs a dedicated COM thread to read master volume safely."""
+    """启动独立 COM 线程读取主音量，避免 UI 线程卡死。"""
 
     _instance: Optional["VolumeEndpointService"] = None
     _lock = threading.Lock()
@@ -35,7 +35,7 @@ class VolumeEndpointService:
             name="VolumeEndpointService",
         )
         self._thread.start()
-        self._ready.wait()
+        self._ready.wait()  # 等待后台线程完成初始化，保证后续调用可用
         if self._startup_error:
             raise RuntimeError(f"初始化音量监视线程失败: {self._startup_error}") from self._startup_error
         atexit.register(self.shutdown)
@@ -55,11 +55,11 @@ class VolumeEndpointService:
         volume = None
         try:
             if pythoncom is not None:
-                pythoncom.CoInitialize()
+                pythoncom.CoInitialize()  # 每个线程单独初始化 COM
                 coinited = True
             devices = AudioUtilities.GetSpeakers()
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            volume = cast(interface, POINTER(IAudioEndpointVolume))  # 获取音量接口指针
         except Exception as exc:  # pragma: no cover - hardware/COM init failures
             self._startup_error = exc
             self._ready.set()
@@ -102,8 +102,9 @@ class VolumeEndpointService:
 
     # ------------------------------------------------------------------
     def get_volume(self) -> float:
-        """Return the current master volume level (0.0 - 1.0)."""
+        """返回当前主音量 (0.0 - 1.0)。"""
 
         future: Future = Future()
+        # 将查询任务投递到 COM 线程，确保线程安全
         self._tasks.put((lambda volume: float(volume.GetMasterVolumeLevelScalar()), future))
         return future.result()
