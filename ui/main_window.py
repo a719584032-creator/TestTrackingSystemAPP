@@ -546,6 +546,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_status.setStyleSheet("color: #6B7280;")
         self._audio_log_status.setWordWrap(True)
         audio_row.addWidget(self._audio_log_status, 1)
+
         self._select_audio_logs_btn = QtWidgets.QPushButton("选择日志")
         self._clear_audio_logs_btn = QtWidgets.QPushButton("清除")
         audio_row.addWidget(self._select_audio_logs_btn)
