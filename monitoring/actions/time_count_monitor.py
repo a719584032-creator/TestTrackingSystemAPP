@@ -7,6 +7,7 @@ import json
 import wmi
 import win32evtlog
 from datetime import datetime
+"""统计s4，s3的时间进行保存在本地"""
 class Json_Excute:
     def __init__(self):
         super().__init__()
