@@ -67,6 +67,4 @@ def run(context: "Patvs_Fuction",
         )
         context.log(f"监控{display_action} 事件出现异常: {error}")
 
-    # finally:
-    #     context.action_complete.set()
 
