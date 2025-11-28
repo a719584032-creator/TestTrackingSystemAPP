@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 import win32evtlog
 import threading
+
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
@@ -17,6 +18,7 @@ def run(
     s3_done_event: Optional[threading.Event] = None,
 ) -> None:
     """统计并监控 S3 睡眠事件。"""
+
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
@@ -108,8 +110,6 @@ def run(
                         context._record_count_progress(
                             target_cycles, total, action_key="s3"
                         )
-
-
             if total > log_num:
                 context.log(
                     f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。"

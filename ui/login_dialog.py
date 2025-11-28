@@ -84,7 +84,6 @@ class LoginDialog(QtWidgets.QDialog):
             "  padding: 12px;"
             "  border-radius: 8px;"
             "  font-weight: 600;"
-            "outline: none; /* 可选：取消整个TreeWidget的焦点轮廓（如果存在） */"
             "}"
             "QPushButton:hover { background-color: #2563eb; }"
             "QPushButton:pressed { background-color: #1d4ed8; }"

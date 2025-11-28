@@ -80,11 +80,6 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("音量"),
     _ActionDefinition("摄像头"),
     _ActionDefinition("Camera"),
-
-    _ActionDefinition("S4记时"),
-    _ActionDefinition("S3记时"),
-    _ActionDefinition("MikeLog"),
-    _ActionDefinition("TransitionCapLog"),
 )
 
 # 常规动作映射：规范化名称 -> 动作定义
@@ -165,13 +160,11 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
             continue
         # 将动作部分解析成规范化定义 + 组件描述，便于界面自动勾选监控项
         definition, components = _resolve_action_name(action_parts)
-
         if definition is None:
             definition, components = _resolve_audio_action(action_parts)
         if definition is None:
             unsupported.append("+".join(action_parts))
             continue
-
         # 保留原始 token 方便错误提示或展示
         actions.append(
             MonitoringAction(
@@ -181,6 +174,7 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
                 raw=token,
             )
         )
+
     if format_errors or unsupported:
         messages: List[str] = []
         if format_errors:
