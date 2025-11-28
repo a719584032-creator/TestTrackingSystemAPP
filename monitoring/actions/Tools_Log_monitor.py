@@ -1,4 +1,4 @@
-"""锁屏事件监控。"""
+"""Log解析事件监控。"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,7 +16,7 @@ from .Log_jugement_monitor import Log_parse
 def run(context: "Patvs_Fuction",
         target_count: float,
         display_action: str | None = None) -> None:
-    """监控音频日志中的关键字出现次数。"""
+
     log_parse_=Log_parse(context,display_action)
     open_files: list[tuple[str, object]] = []
     try:
