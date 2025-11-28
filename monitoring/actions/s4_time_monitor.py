@@ -1,4 +1,4 @@
-"""S4 睡眠事件监控。"""
+"""S4 睡眠时间事件监控。"""
 from __future__ import annotations
 
 import time
@@ -11,7 +11,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
-    """统计并监控 S4 睡眠事件。"""
+    """统计并监控 S4 睡眠时间事件。"""
     s4_times_ = S4_times(context)
     try:
         target_cycles = float(target_cycles)

@@ -80,7 +80,6 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("音量"),
     _ActionDefinition("摄像头"),
     _ActionDefinition("Camera"),
-
     _ActionDefinition("S4记时"),
     _ActionDefinition("S3记时"),
     _ActionDefinition("MikeLog"),

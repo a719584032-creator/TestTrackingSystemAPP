@@ -911,18 +911,14 @@ class Patvs_Fuction:
                         ).start()
 
                     elif normalized_action == "s4记时":
-                        self.log(
-                            f"开始执行监控: {action}，目标测试次数: {target_value:g}"
-                        )
+                        self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(
                             target=s4_time_monitor.run,
                             args=(self, self.case_start_time, target_value),
                         ).start()
 
                     elif normalized_action == "s3记时":
-                        self.log(
-                            f"开始执行监控: {action}，目标测试次数: {target_value:g}"
-                        )
+                        self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(
                             target=s3_time_monitor.run,
                             args=(self, self.case_start_time, target_value),

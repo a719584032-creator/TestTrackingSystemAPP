@@ -1,4 +1,4 @@
-"""S3 睡眠事件监控。"""
+"""S3 睡眠时间事件监控。"""
 from __future__ import annotations
 
 import time
@@ -17,7 +17,7 @@ def run(
     target_cycles,
     s3_done_event: Optional[threading.Event] = None,
 ) -> None:
-    """统计并监控 S3 睡眠事件。"""
+    """统计并监控 S3 睡眠时间事件。"""
     s4_times_ = S4_times(context, state='S3')
     try:
         target_cycles = float(target_cycles)
