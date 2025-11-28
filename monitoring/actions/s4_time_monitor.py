@@ -5,7 +5,7 @@ import time
 from typing import TYPE_CHECKING
 
 import win32evtlog
-from .time_count_monitore import S4_times
+from .time_count_monitor import S4_times
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
