@@ -751,6 +751,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._audio_log_dir_hint,
             "Log files (*.log *.txt);;All files (*)",
         )
+
         if not files:
             return
         self._set_audio_log_files(files)
@@ -1506,7 +1507,6 @@ class MainWindow(QtWidgets.QMainWindow):
         root = self._case_tree.invisibleRootItem()
         target_key = self._pending_selection or self._selection_key(self._current_entry)
         selected_item: Optional[QtWidgets.QTreeWidgetItem] = None
-
         for entry in self._filtered_entries:
             case = entry.case
             tokens = self._directory_tokens(case.group_path)
@@ -1830,6 +1830,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return False
 
     # ------------------------------------------------------------------
+    def _requires_text_logs(self) ->list:
+
+        for action in self._current_actions:
+            if 'log' in action.normalized_name:
+                return [True, action.normalized_name]
+        return [False,'None']
+
+    # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
         """ 开始执行 """
         try:
@@ -1863,11 +1871,20 @@ class MainWindow(QtWidgets.QMainWindow):
                     "该用例包含 Lab Audio 监控，请先选择至少一个串口日志文件。",
                 )
                 return
+            require_text_logs,log_name = self._requires_text_logs()
+            if require_text_logs and not self._audio_log_files:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "缺少日志文件",
+                    f"该用例包含 {log_name} 监控，请先选择至少一个串口日志文件。",
+                )
+                return
             self._monitoring.start(
                 self._current_case.case_id,
                 self._current_actions,
                 start_time,
-                audio_log_files=self._audio_log_files if require_audio_logs else None,
+                # audio_log_files=self._audio_log_files if require_audio_logs else None,
+                audio_log_files=self._audio_log_files,
             )
             self._append_log("监控已启动")
             self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)

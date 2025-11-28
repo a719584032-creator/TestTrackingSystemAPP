@@ -5,14 +5,12 @@ import time
 from typing import TYPE_CHECKING
 
 import win32evtlog
-
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
 def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     """统计并监控 S4 睡眠事件。"""
-
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
@@ -33,6 +31,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     last_seen_time = last_event_time
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s4")
+
     if total:
         context.log(f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
     if total >= target_cycles:
@@ -98,6 +97,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                         context._record_count_progress(
                             target_cycles, total, action_key="s4"
                         )
+
             if total > log_num:
                 context.log(
                     f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。"

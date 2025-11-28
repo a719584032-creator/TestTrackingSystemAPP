@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 import win32evtlog
 import threading
+from .time_count_monitor import S4_times
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
@@ -17,6 +18,7 @@ def run(
     s3_done_event: Optional[threading.Event] = None,
 ) -> None:
     """统计并监控 S3 睡眠事件。"""
+    s4_times_ = S4_times(context, state='S3')
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
@@ -37,6 +39,12 @@ def run(
     ) = context._bootstrap_event_progress(
         start_time, lambda event: event.EventID in (507, 107)
     )
+    if total==0:
+        s4_times_.remove_json()
+    else:
+        s4_times_.view_times()
+    count_flags = False
+
     last_seen_time = last_event_time
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s3")
@@ -101,6 +109,7 @@ def run(
                         context._record_count_progress(
                             target_cycles, total, action_key="s3"
                         )
+                        count_flags = True
                     elif record_number <= 0 or occurred_time > last_seen_time:
                         last_record_number = record_number
                         last_seen_time = occurred_time
@@ -108,13 +117,19 @@ def run(
                         context._record_count_progress(
                             target_cycles, total, action_key="s3"
                         )
+                        count_flags= True
 
+            if count_flags:
+                time.sleep(1)
+                s4_times_.filter_sleep_events(last_event_time, total)
+                count_flags = False
 
             if total > log_num:
                 context.log(
                     f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。"
                 )
                 log_num = total
+
             if total >= target_cycles:
                 context._record_count_progress(target_cycles, total, action_key="s3")
                 context.log(f"已完成目标S3次数: {total}")
