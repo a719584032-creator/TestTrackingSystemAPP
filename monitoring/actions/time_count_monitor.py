@@ -147,10 +147,8 @@ class S4_times(Json_Excute):
         if not isinstance(events, list):
             return events
         sleep_events = []
-        # 筛选条件：来源为Kernel-Power，事件ID为187（进入睡眠）
         for event in events:
             if isinstance(event, dict) and datetime.strptime(event["时间"], self.time_formate) >= start_time:
-                # sleep_events.append(event["时间"])
                 if event["事件ID"] ==566 and len(sleep_events)<2:
                     sleep_events.append(event["时间"])
 
