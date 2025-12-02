@@ -13,8 +13,6 @@ from pathlib import Path
 
 from .Log_jugement_monitor import Log_parse
 
-
-
 def run(context: "Patvs_Fuction",
         target_count: float,
         display_action: str | None = None) -> None:
