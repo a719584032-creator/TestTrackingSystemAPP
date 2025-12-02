@@ -169,6 +169,7 @@ class ResultDialog(QtWidgets.QDialog):
             os.path.expanduser("~"),
             "All Files (*)",
         )
+        p_size=0
         for path in files:
             try:
                 payload = encode_attachment(path)
@@ -176,6 +177,9 @@ class ResultDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
             payload["local_path"] = path
+            p_size+=Path((path)).stat().st_size
+            if p_size > 1024*1024*50:
+                QtWidgets.QMessageBox.warning(self, "文件过大", "请勿上传大于50MB的文件")
             self._attachments.append(payload)
             self._attachment_list.addItem(os.path.basename(path))
 

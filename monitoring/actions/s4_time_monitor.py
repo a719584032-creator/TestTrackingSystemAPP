@@ -32,7 +32,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     )
     last_seen_time = last_event_time
     log_num = total
-    context._record_count_progress(target_cycles, total, action_key="s4")
+    context._record_count_progress(target_cycles, total, action_key="s4记时")
     if total==0:
         s4_times_.remove_json()
     else:
@@ -55,7 +55,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
 
     hand = reopen_event_log()
     if hand is None:
-        context._record_count_progress(target_cycles, total, action_key="s4")
+        context._record_count_progress(target_cycles, total, action_key="s4记时")
         return
 
     flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
@@ -95,7 +95,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                         last_seen_time = occurred_time
                         total += 1
                         context._record_count_progress(
-                            target_cycles, total, action_key="s4"
+                            target_cycles, total, action_key="s4记时"
                         )
                         count_flags = True
                     elif record_number <= 0 or occurred_time > last_seen_time:
@@ -103,7 +103,7 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                         last_seen_time = occurred_time
                         total += 1
                         context._record_count_progress(
-                            target_cycles, total, action_key="s4"
+                            target_cycles, total, action_key="s4记时"
                         )
                         count_flags = True
             if count_flags:
@@ -117,11 +117,11 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                 )
                 log_num = total
             if total >= target_cycles:
-                context._record_count_progress(target_cycles, total, action_key="s4")
+                context._record_count_progress(target_cycles, total, action_key="s4记时")
                 context.log(f"已完成目标S4次数: {target_cycles:g}")
                 return
     finally:
-        context._record_count_progress(target_cycles, total, action_key="s4")
+        context._record_count_progress(target_cycles, total, action_key="s4记时")
         context.log("停止S4事件监控.")
         if hand:
             try:

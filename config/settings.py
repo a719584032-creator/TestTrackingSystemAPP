@@ -42,8 +42,8 @@ class OTASettings:
 class CryptoSettings:
     """时间加密 key，与后端对应"""
 
-    #result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key")
-    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")
+    # result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key") #测试环境加密
+    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")  #开发环境加密
 
 @dataclass(slots=True)
 class ClientSettings:

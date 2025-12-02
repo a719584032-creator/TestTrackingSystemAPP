@@ -47,7 +47,7 @@ def run(
 
     last_seen_time = last_event_time
     log_num = total
-    context._record_count_progress(target_cycles, total, action_key="s3")
+    context._record_count_progress(target_cycles, total, action_key="s3记时")
     if total:
         context.log(f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
     if total >= target_cycles:
@@ -67,7 +67,7 @@ def run(
 
     hand = reopen_event_log()
     if hand is None:
-        context._record_count_progress(target_cycles, total, action_key="s3")
+        context._record_count_progress(target_cycles, total, action_key="s3记时")
         return
 
     flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
@@ -107,7 +107,7 @@ def run(
                         last_seen_time = occurred_time
                         total += 1
                         context._record_count_progress(
-                            target_cycles, total, action_key="s3"
+                            target_cycles, total, action_key="s3记时"
                         )
                         count_flags = True
                     elif record_number <= 0 or occurred_time > last_seen_time:
@@ -115,7 +115,7 @@ def run(
                         last_seen_time = occurred_time
                         total += 1
                         context._record_count_progress(
-                            target_cycles, total, action_key="s3"
+                            target_cycles, total, action_key="s3记时"
                         )
                         count_flags= True
 
@@ -131,11 +131,11 @@ def run(
                 log_num = total
 
             if total >= target_cycles:
-                context._record_count_progress(target_cycles, total, action_key="s3")
+                context._record_count_progress(target_cycles, total, action_key="s3记时")
                 context.log(f"已完成目标S3次数: {total}")
                 return
     finally:
-        context._record_count_progress(target_cycles, total, action_key="s3")
+        context._record_count_progress(target_cycles, total, action_key="s3记时")
         if hand:
             try:
                 win32evtlog.CloseEventLog(hand)
