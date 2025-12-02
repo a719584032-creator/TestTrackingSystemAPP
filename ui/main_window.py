@@ -33,8 +33,6 @@ from utils.exceptions import AuthenticationError, ClientError, NetworkError, Upd
 from config.settings import APP_VERSION, SETTINGS
 
 
-
-
 PASS_SYMBOL_COLOR = "#16A34A"
 FAIL_SYMBOL_COLOR = "#DC2626"
 BLOCK_SYMBOL_COLOR = "#6B7280"
@@ -120,7 +118,7 @@ class ResultDialog(QtWidgets.QDialog):
         self._attachment_list = QtWidgets.QListWidget()
         attachment_layout.addWidget(self._attachment_list)
         btn_row = QtWidgets.QHBoxLayout()
-        self._add_attachment_btn = QtWidgets.QPushButton("添加图片")
+        self._add_attachment_btn = QtWidgets.QPushButton("添加图片/附件")
         self._remove_attachment_btn = QtWidgets.QPushButton("移除选中")
         btn_row.addWidget(self._add_attachment_btn)
         btn_row.addWidget(self._remove_attachment_btn)
@@ -151,11 +149,12 @@ class ResultDialog(QtWidgets.QDialog):
         """ 添加图片附件 """
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "选择图片",
+            "选择图片/附件",
             os.path.expanduser("~"),
-            "Images (*.png *.jpg *.jpeg *.bmp)",
-        #    "All Files (*)", 暂时不开放其它类型，后续更改
+            # "Images (*.png *.jpg *.jpeg *.bmp)",
+           "All Files (*)", #暂时不开放其它类型，后续更改
         )
+        p_size=0
         for path in files:
             try:
                 payload = encode_attachment(path)
@@ -163,6 +162,9 @@ class ResultDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
             payload["local_path"] = path
+            p_size+=Path((path)).stat().st_size
+            if p_size > 1024*1024*50:
+                QtWidgets.QMessageBox.warning(self, "文件过大", "请勿上传大于50MB的文件")
             self._attachments.append(payload)
             self._attachment_list.addItem(os.path.basename(path))
 
@@ -610,6 +612,15 @@ class MainWindow(QtWidgets.QMainWindow):
         status = QtWidgets.QStatusBar()
         self.setStatusBar(status)
         status.clearMessage()
+
+    def open_view_status_window(self):
+        self.frame_window = QtWidgets.QWidget()
+        self.ui_frame = View_Status(self._filtered_entries)
+        self.ui_frame.setup_tables(self.frame_window)
+
+        # 设置为应用程序模态窗口，阻止父窗口交互
+        self.frame_window.setWindowModality(QtCore.Qt.ApplicationModal)
+        self.frame_window.show()
 
     def _style_action_button(self, button: QtWidgets.QPushButton, color: str) -> None:
         """ 结果按钮样式 """
