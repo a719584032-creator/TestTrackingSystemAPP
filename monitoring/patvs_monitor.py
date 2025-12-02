@@ -924,15 +924,8 @@ class Patvs_Fuction:
                             args=(self, self.case_start_time, target_value),
                         ).start()
 
-                    elif normalized_action == "mikelog":
-                        self.log(f"开始执行监控: {display_action} 对MikeII的Log进行解析判断")
-                        threading.Thread(
-                            target=Tools_Log_monitor.run,
-                            args=(self,target_value,display_action),
-                        ).start()
-
-                    elif normalized_action == "TransitionCapLog".lower():
-                        self.log(f"开始执行监控: {display_action} 对TransitionCapLog的Log进行解析判断")
+                    elif 'log' in normalized_action.lower():
+                        self.log(f"开始执行监控: {display_action} 对 {normalized_action.title()} 的Log进行解析判断")
                         threading.Thread(
                             target=Tools_Log_monitor.run,
                             args=(self, target_value, display_action),
