@@ -9,7 +9,7 @@ from .paths import get_patvs_root
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
@@ -20,8 +20,8 @@ DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4
 class ApiSettings:
     """API 设置"""
 
-    base_url: str = "https://patvs.lenovo.com/api"
-    #base_url: str = "http://10.184.46.54:5173/api"
+    #base_url: str = "https://patvs.lenovo.com/api"
+    base_url: str = "http://10.184.46.54:5173/api"
     #base_url: str = "http://172.28.79.247:5173/api"
 
     timeout: int = 60

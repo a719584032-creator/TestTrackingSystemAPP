@@ -21,10 +21,15 @@ from models import (
     Project,
     TestPlan,
 )
-from monitoring import MonitoringAction
 from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
-from monitoring.parser import MonitoringAction, parse_keywords, require_attachment
+from monitoring.parser import (
+    MonitoringAction,
+    parse_keywords,
+    recording_requirement_minutes,
+    require_attachment,
+)
+from monitoring.actions.luyin import get_audio_duration_seconds
 from services.api_client import ApiClient, encode_attachment
 from services.ota import UpdateInfo
 from services.update_manager import UpdateManager
@@ -83,10 +88,12 @@ class ResultDialog(QtWidgets.QDialog):
         result_label: str,
         case_title: str,
         device_hint: Optional[str],  # 机型提示
-        require_attachment: bool,    # 是否必须上传图片
+        require_attachment: bool,    # 是否必须上传附件
+        recording_requirement: Optional[float] = None,  # 录音时长要求（分钟）
     ) -> None:
         super().__init__(parent)
         self._require_attachment = require_attachment
+        self._recording_requirement = recording_requirement
         self._attachments: List[Dict[str, str]] = []
 
         self.setWindowTitle(f"提交结果 - {result_label}")
@@ -115,12 +122,12 @@ class ResultDialog(QtWidgets.QDialog):
             form.addRow("执行机型:", hint_label)
         layout.addLayout(form)
 
-        attachment_box = QtWidgets.QGroupBox("截图 / 附件")
+        attachment_box = QtWidgets.QGroupBox("附件")
         attachment_layout = QtWidgets.QVBoxLayout(attachment_box)
         self._attachment_list = QtWidgets.QListWidget()
         attachment_layout.addWidget(self._attachment_list)
         btn_row = QtWidgets.QHBoxLayout()
-        self._add_attachment_btn = QtWidgets.QPushButton("添加图片")
+        self._add_attachment_btn = QtWidgets.QPushButton("添加附件")
         self._remove_attachment_btn = QtWidgets.QPushButton("移除选中")
         btn_row.addWidget(self._add_attachment_btn)
         btn_row.addWidget(self._remove_attachment_btn)
@@ -128,8 +135,15 @@ class ResultDialog(QtWidgets.QDialog):
         attachment_layout.addLayout(btn_row)
         layout.addWidget(attachment_box)
 
+        hint_messages: List[str] = []
         if self._require_attachment:
-            hint = QtWidgets.QLabel("该结果需要至少上传一张截图作为佐证。")
+            hint_messages.append("该结果需要至少上传一个附件作为佐证。")
+        if self._recording_requirement:
+            hint_messages.append(
+                f"请上传时长不少于 {self._recording_requirement:g} 分钟的录音文件，提交前会校验时长。"
+            )
+        if hint_messages:
+            hint = QtWidgets.QLabel("\n".join(hint_messages))
             hint.setStyleSheet("color: #2563eb;")
             layout.addWidget(hint)
 
@@ -148,13 +162,12 @@ class ResultDialog(QtWidgets.QDialog):
 
     # ------------------------------------------------------------------
     def _add_attachment(self) -> None:
-        """ 添加图片附件 """
+        """ 添加附件 """
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "选择图片",
+            "选择附件",
             os.path.expanduser("~"),
-            "Images (*.png *.jpg *.jpeg *.bmp)",
-        #    "All Files (*)", 暂时不开放其它类型，后续更改
+            "All Files (*)",
         )
         for path in files:
             try:
@@ -167,7 +180,7 @@ class ResultDialog(QtWidgets.QDialog):
             self._attachment_list.addItem(os.path.basename(path))
 
     def _remove_attachment(self) -> None:
-        """ 删除图片附件 """
+        """ 删除附件 """
         row = self._attachment_list.currentRow()
         if row < 0 or row >= len(self._attachments):
             return
@@ -192,7 +205,7 @@ class ResultDialog(QtWidgets.QDialog):
     # ------------------------------------------------------------------
     def accept(self) -> None:  # noqa: D401 - 继承父类文档字符串
         if self._require_attachment and not self._attachments:
-            QtWidgets.QMessageBox.warning(self, "缺少附件", "请至少上传一张截图后再提交。")
+            QtWidgets.QMessageBox.warning(self, "缺少附件", "请至少上传一个附件后再提交。")
             return
         super().accept()
 
@@ -244,6 +257,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_files: List[str] = []
         self._pending_audio_logs: Optional[List[str]] = None
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
+        self._recording_requirement_minutes: Optional[float] = None
         self._pending_update_info: Optional[UpdateInfo] = None
         self._staged_update_path: Optional[Path] = None
         self._download_dialog: Optional[QtWidgets.QProgressDialog] = None
@@ -1753,6 +1767,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_actions = []
         self._current_device_id = entry.device_model_id if entry else None
         self._current_plan_device_model_id = entry.plan_device_model_id if entry else None
+        self._recording_requirement_minutes = None
         if not self._execution_locked:
             self._set_action_buttons_mode(False)
         if not case:
@@ -1813,14 +1828,19 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._keyword_error.setVisible(False)
             self._current_actions = actions
+            self._recording_requirement_minutes = recording_requirement_minutes(actions)
             for action in actions:
                 self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
         self._refresh_start_button_state()
         self._log_view.clear()
+        attachment_hints: List[str] = []
         if require_attachment(self._current_actions):
-            self._attachment_hint.setText("此用例包含时间监控，提交 PASS/FAIL 必须上传截图")
-        else:
-            self._attachment_hint.clear()
+            attachment_hints.append("此用例包含时间监控，提交 PASS/FAIL 必须上传附件")
+        if self._recording_requirement_minutes:
+            attachment_hints.append(
+                f"提交通过需上传录音（时长不少于 {self._recording_requirement_minutes:g} 分钟）"
+            )
+        self._attachment_hint.setText("\n".join(attachment_hints))
 
     # ------------------------------------------------------------------
     def _requires_audio_logs(self) -> bool:
@@ -1837,6 +1857,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if 'log' in action.normalized_name:
                 return [True, action.normalized_name]
         return [False,'None']
+
+    def _is_recording_action(self, action: MonitoringAction) -> bool:
+        return action.normalized_name == "录音"
 
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
@@ -1860,7 +1883,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     )
                     if confirm != QtWidgets.QMessageBox.Yes:
                         return
-            self._awaiting_monitor_completion_for_pass = bool(self._current_actions)
+            monitoring_actions = [
+                action for action in self._current_actions if not self._is_recording_action(action)
+            ]
+            self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
             start_time = dt.datetime.now(dt.timezone.utc).isoformat()
             if self._current_case and self._current_case.id:
                 self._case_execution_start_times[int(self._current_case.id)] = start_time
@@ -1880,15 +1906,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"该用例包含 {log_name} 监控，请先选择至少一个串口日志文件。",
                 )
                 return
-            self._monitoring.start(
-                self._current_case.case_id,
-                self._current_actions,
-                start_time,
-                # audio_log_files=self._audio_log_files if require_audio_logs else None,
-                audio_log_files=self._audio_log_files,
-            )
-            self._append_log("监控已启动")
-            self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
+            if monitoring_actions:
+                self._monitoring.start(
+                    self._current_case.case_id,
+                    monitoring_actions,
+                    start_time,
+                    audio_log_files=self._audio_log_files,
+                )
+                self._append_log("监控已启动")
+                self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
+            else:
+                self._append_log("当前用例无需自动监控，提交附件后可以直接记录结果。")
             self._set_action_buttons_mode(True)
             self._set_execution_lock(True)
             self.save_state()
@@ -1924,6 +1952,44 @@ class MainWindow(QtWidgets.QMainWindow):
                 hint_text = f"{entry.device_label}"
         return device_model_id, plan_device_model_id, hint_text
 
+    def _validate_recording_attachments(
+        self,
+        attachments: Sequence[Dict[str, str]],
+        required_minutes: Optional[float],
+    ) -> bool:
+        """Ensure at least one attachment meets the recording duration requirement."""
+
+        if required_minutes is None or required_minutes <= 0:
+            return True
+        if not attachments:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "缺少录音",
+                f"提交通过需要上传时长不少于 {required_minutes:g} 分钟的录音文件。",
+            )
+            return False
+
+        required_seconds = required_minutes * 60
+        errors: List[str] = []
+        for payload in attachments:
+            path = payload.get("local_path")
+            if not path:
+                continue
+            try:
+                duration = get_audio_duration_seconds(path)
+            except ValueError as exc:
+                errors.append(f"{os.path.basename(path)}: {exc}")
+                continue
+            if duration >= required_seconds:
+                return True
+            errors.append(
+                f"{os.path.basename(path)} 时长 {duration / 60:.1f} 分钟，不足 {required_minutes:g} 分钟"
+            )
+
+        message = "\n".join(errors) if errors else "请上传可识别的录音文件。"
+        QtWidgets.QMessageBox.warning(self, "录音不符合要求", message)
+        return False
+
     def _submit_result(self, result: str) -> None:
         """ 更新结果 """
         if not self._current_case:
@@ -1944,7 +2010,14 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValidationError as exc:
             QtWidgets.QMessageBox.warning(self, "关键字错误", str(exc))
             return
-        need_attachment = result in {"pass", "fail"} and require_attachment(actions)
+        recording_minutes = recording_requirement_minutes(actions)
+        recording_required_for_result = (
+            result == "pass" and recording_minutes is not None and recording_minutes > 0
+        )
+        need_attachment = (
+            (result in {"pass", "fail"} and require_attachment(actions))
+            or recording_required_for_result
+        )
         device_model_id, plan_device_model_id, device_hint = self._resolve_submission_device(
             self._current_entry
         )
@@ -1954,6 +2027,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._case_display_text(self._current_entry),
             device_hint,
             need_attachment,
+            recording_requirement=recording_minutes if recording_required_for_result else None,
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -1966,9 +2040,13 @@ class MainWindow(QtWidgets.QMainWindow):
         remark = dialog.remark()
         failure_reason = dialog.failure_reason()
         bug_ref = dialog.bug_ref()
+        attachments_with_local = dialog.attachments()
+        if recording_required_for_result:
+            if not self._validate_recording_attachments(attachments_with_local, recording_minutes):
+                return
         attachments = [
             {k: v for k, v in payload.items() if k != "local_path"}
-            for payload in dialog.attachments()
+            for payload in attachments_with_local
         ]
         if self._monitoring.is_running():
             self._monitoring.stop()
@@ -2009,7 +2087,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_state()
         self._reload_current_plan()
         # 强制等待保证稳定性
-        time.sleep(0.5)
+        time.sleep(0.2)
         self._set_action_buttons_mode(False)
 
     def _reload_current_plan(self) -> None:
