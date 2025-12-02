@@ -78,43 +78,6 @@ class Log_parse:
 
         return test_name+[test_result[-1]]
 
-    def excute_diskspeed_(self,string_data:str)->list:
-
-        dicsk_speed_=re.findall(
-    r'Sequential\s*1MiB\s*(Q=\s*8.\s*T=\s*1).\s*(\d+.\d+)\s*(\w+)\[$',
-                string_data)
-        print(self.diskspeed_jugement(*dicsk_speed_))
-        return dicsk_speed_
-
-    def finder_diskspeed_data(self,log_data)->list:
-        log_list=log_data.split("\n")
-        print(log_list)
-        _read_flag_=False
-        _write_flag_=False
-        data_dic={}
-
-        for i in log_list:
-
-            if re.search(r'\[Read\]',i)!=None:
-                _read_flag_= True
-            if re.search(r'\[Write\]',i)!=None:
-                _write_flag_= True
-                _read_flag_=False
-
-            if _read_flag_:
-                data_dic.setdefault('readspeed',[]).append(self.excute_diskspeed_(i))
-
-            if _write_flag_:
-                data_dic.setdefault('writespeed',[]).append(self.excute_diskspeed_(i))
-        print(data_dic)
-
-    def diskspeed_jugement(self, number: str, unite: str):
-        """
-        :param name:
-        :param count:
-        :return:
-        """
-        print(number, unite)
 
     def data_jugement(self,name:str,count:str)->str:
         """
@@ -136,7 +99,6 @@ class Log_parse:
         log_info_=[]
         result_info=None
         paths_ = Path(paths)
-
         if paths_.is_file() :
 
             if self.keyword.lower()=='transitioncaplog':
@@ -150,9 +112,6 @@ class Log_parse:
             elif self.keyword.lower()=='driverslog':
                 log_info_ = self.finder_drivers_data(self.read_log_(paths_))
 
-            elif self.keyword.lower()=='diskspeedlog':
-
-                log_info_ = self.finder_diskspeed_data(self.read_log_(paths_))
 
             if result_info!=None:
                 log_info_.append(result_info)
@@ -161,9 +120,3 @@ class Log_parse:
 
         return log_info_
 
-
-class HTML_parse:
-    def __init__(self):
-        super().__init__()
-    def html_parse(self):
-        pass
