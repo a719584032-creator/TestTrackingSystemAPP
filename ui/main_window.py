@@ -149,9 +149,8 @@ class ResultDialog(QtWidgets.QDialog):
         """ 添加图片附件 """
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "选择图片/附件",
+            "选择附件",
             os.path.expanduser("~"),
-            # "Images (*.png *.jpg *.jpeg *.bmp)",
            "All Files (*)", #暂时不开放其它类型，后续更改
         )
         p_size=0
