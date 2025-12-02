@@ -1059,7 +1059,7 @@ class Patvs_Fuction:
                 self.logger.warning("所有动作执行完毕，本次将保留临时文件，确保重启后仍可读取上次执行记录。")
             self.logger.warning("所有动作执行完毕，解禁按钮")
             self.save_session_state(force=True)
-            time.sleep(1) # 究极防御崩溃代码
+            time.sleep(0.2) # 究极防御崩溃代码
             # 通知UI完成监控，解禁按钮
             self.call_after(self.window.after_test)
             run_completed = True

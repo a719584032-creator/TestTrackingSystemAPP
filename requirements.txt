@@ -1,5 +1,6 @@
 comtypes==1.2.1
 cryptography
+mutagen
 opencv-python
 psutil
 pycaw

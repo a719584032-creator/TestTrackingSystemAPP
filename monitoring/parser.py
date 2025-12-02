@@ -67,6 +67,7 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("S3"),
     _ActionDefinition("S4"),
     _ActionDefinition("S5"),
+    _ActionDefinition("录音"),
     _ActionDefinition("Restart"),
     _ActionDefinition("电源插拔"),
     _ActionDefinition("USB 插拔"),
@@ -209,3 +210,12 @@ def require_attachment(actions: Iterable[MonitoringAction]) -> bool:
         if "时间" in action.name or action.normalized_name == _normalize("时间"):
             return True
     return False
+
+
+def recording_requirement_minutes(actions: Iterable[MonitoringAction]) -> float | None:
+    """Return required recording length (minutes) if a 录音 action is present."""
+
+    for action in actions:
+        if action.normalized_name == _normalize("录音"):
+            return max(0.0, float(action.amount))
+    return None
