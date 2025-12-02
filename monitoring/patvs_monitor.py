@@ -566,10 +566,12 @@ class Patvs_Fuction:
         )
         return datetime.datetime.now()
 
-    def _bootstrap_event_progress(
-        self, start_time, match_event: Callable[[object], bool]
-    ):
+    def _bootstrap_event_progress( self, start_time, match_event: Callable[[object], bool]):
+        """
+        监控之前先获取历史记录，返回最后一次的执行记录
+        """
         normalized_start = self._normalize_start_time(start_time)
+        # 初始化统计记录，最新记录号，最新时间
         count = 0
         last_record_number = 0
         last_event_time = None
@@ -588,13 +590,17 @@ class Patvs_Fuction:
                 if not events:
                     break
                 for event in events:
+                    # 事件ID
                     if match_event(event):
                         occurred_time = event.TimeGenerated
+                        # 开始时间之后
                         if occurred_time > normalized_start:
                             count += 1
+                            # 记录号，有些情况下可能没有 RecordNumber，因此做个兜底
                             record_number = getattr(event, "RecordNumber", 0) or 0
                             if record_number > last_record_number:
                                 last_record_number = record_number
+                            # 记录最新的事件时间（取最大值）
                             if (
                                 last_event_time is None
                                 or occurred_time > last_event_time
@@ -610,10 +616,10 @@ class Patvs_Fuction:
                     self.logger.warning(
                         f"Error closing bootstrap event log: {close_exc}"
                     )
-
+        # 如果一个匹配事件都没找到，就把 last_event_time 设为起始时间
         if last_event_time is None:
             last_event_time = normalized_start
-
+        # 返回标准化后的起始时间、匹配到的事件总数、最大记录号、最后事件时间
         return normalized_start, count, last_record_number, last_event_time
 
 

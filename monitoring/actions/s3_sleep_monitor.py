@@ -39,6 +39,16 @@ def run(
     )
     last_seen_time = last_event_time
     log_num = total
+
+    def log_progress_if_changed():
+        nonlocal log_num
+        if total != log_num:
+            context.log(
+                f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。"
+            )
+            log_num = total
+
+    # 记录初始进度
     context._record_count_progress(target_cycles, total, action_key="s3")
     if total:
         context.log(f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
@@ -51,6 +61,7 @@ def run(
         return
 
     def reopen_event_log():
+        # 打开系统日志
         try:
             return win32evtlog.OpenEventLog(None, "System")
         except Exception as exc:  # pragma: no cover - 仅用于错误追踪
@@ -64,6 +75,7 @@ def run(
 
     flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
     try:
+        # 循环读取日志
         while context.is_running:
             if not hand:
                 hand = reopen_event_log()
@@ -90,10 +102,13 @@ def run(
 
             for event in events:
                 if event.EventID in (507, 107):
+                    # 日志开始时间
                     occurred_time = event.TimeGenerated
+                    # 事件记录ID
                     record_number = getattr(event, "RecordNumber", 0) or 0
                     if occurred_time <= start_time:
                         continue
+                    # RecordNumber 比上次大，新事件
                     if record_number > last_record_number:
                         last_record_number = record_number
                         last_seen_time = occurred_time
@@ -101,6 +116,8 @@ def run(
                         context._record_count_progress(
                             target_cycles, total, action_key="s3"
                         )
+                        log_progress_if_changed()
+                    # 冗余判断，当record_number有问题时使用 时间判断
                     elif record_number <= 0 or occurred_time > last_seen_time:
                         last_record_number = record_number
                         last_seen_time = occurred_time
@@ -108,13 +125,9 @@ def run(
                         context._record_count_progress(
                             target_cycles, total, action_key="s3"
                         )
+                        log_progress_if_changed()
 
 
-            if total > log_num:
-                context.log(
-                    f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。"
-                )
-                log_num = total
             if total >= target_cycles:
                 context._record_count_progress(target_cycles, total, action_key="s3")
                 context.log(f"已完成目标S3次数: {total}")
