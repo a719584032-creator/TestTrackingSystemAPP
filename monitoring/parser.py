@@ -87,7 +87,7 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("MikeLog"),
     _ActionDefinition("TransitionCapLog"),
     _ActionDefinition("DriversLog"),
-    _ActionDefinition("CrystalDiskMarkLog"),
+
 )
 
 # 常规动作映射：规范化名称 -> 动作定义
