@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import mimetypes
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import requests
@@ -234,8 +235,10 @@ def encode_attachment(path: str) -> Dict[str, str]:
     with open(path, "rb") as handle:
         binary = handle.read()
     content = base64.b64encode(binary).decode("ascii")
+    mime_type, _ = mimetypes.guess_type(path)
+    mime_type = mime_type or "application/octet-stream"
     return {
         "file_name": os.path.basename(path),
-        "content": f"data:image/png;base64,{content}",
+        "content": f"data:{mime_type};base64,{content}",
         "size": len(binary),
     }

@@ -13,6 +13,7 @@ dependencies = [
     "PyQt5",
     "requests",
     "cryptography",
+    "mutagen",
     "psutil",
     "pynput",
     "pycaw",
