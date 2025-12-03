@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtGui, QtWidgets
 
 from monitoring.manager import MonitoringManager
 from services.api_client import ApiClient
@@ -26,6 +26,10 @@ def main() -> int:
     logger.info("应用启动，日志目录: %s", log_dir)
 
     app = QtWidgets.QApplication(sys.argv)
+    default_font = QtGui.QFont(app.font())
+    base_size = default_font.pointSize()
+    default_font.setPointSize(base_size + 2 if base_size > 0 else 12)
+    app.setFont(default_font)
     api_client = ApiClient()
     auth_store = AuthStore()
     window_state = WindowStateStore()
