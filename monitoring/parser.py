@@ -88,6 +88,7 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("MikeLog"),
     _ActionDefinition("TransitionCapLog"),
     _ActionDefinition("DriversLog"),
+    _ActionDefinition("CrystalDiskMarkLog"),
 
 )
 
