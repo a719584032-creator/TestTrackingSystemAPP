@@ -9,7 +9,7 @@ from .paths import get_patvs_root
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.6"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
