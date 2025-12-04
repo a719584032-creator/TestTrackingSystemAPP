@@ -63,6 +63,7 @@ class _ActionDefinition:
 
 
 _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
+
     _ActionDefinition("时间"),
     _ActionDefinition("S3"),
     _ActionDefinition("S4"),
@@ -89,6 +90,7 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("TransitionCapLog"),
     _ActionDefinition("DriversLog"),
     _ActionDefinition("CrystalDiskMarkLog"),
+    _ActionDefinition("MDAVTLog"),
 
 )
 
