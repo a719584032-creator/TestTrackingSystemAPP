@@ -58,6 +58,7 @@ RESULT_LABELS = {
     "skipped": "已跳过",
 }
 
+
 @dataclass(slots=True)
 class CaseDisplayEntry:
     """ 展示/筛选“用例”最新结果 """
@@ -572,7 +573,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._start_monitor_btn = QtWidgets.QPushButton("开始执行")
 
-
         monitor_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         keyword_widget = QtWidgets.QWidget()
         keyword_layout = QtWidgets.QVBoxLayout(keyword_widget)
@@ -673,7 +673,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_action_buttons_mode(self, running: bool) -> None:
         # 根据 running 展示 开始执行按钮 或者是 pass,fail,block 按钮
         self._start_monitor_btn.setVisible(not running)
-
         for button in self._result_buttons:
             button.setVisible(running)
         if running:
@@ -685,7 +684,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._awaiting_monitor_completion_for_pass = False
             for button in self._result_buttons:
                 button.setEnabled(False)
-
             self._pass_btn.setToolTip("")
             self._refresh_start_button_state()
 
@@ -736,8 +734,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             seen.add(normalized)
             deduped.append(normalized)
-        # self._audio_log_files = deduped
-        self._audio_log_files.extend(deduped)
+        self._audio_log_files = deduped
         if deduped:
             directory = os.path.dirname(deduped[-1])
             if directory:
@@ -1867,14 +1864,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _is_recording_action(self, action: MonitoringAction) -> bool:
         return action.normalized_name == "录音"
+
     # ------------------------------------------------------------------
-    def setting_log_Button(self, status:bool):
-        self._clear_audio_logs_btn.setEnabled(status)
-        self._select_audio_logs_btn.setEnabled(status)
-    #-------------------------------------------------------------------
     def _start_monitoring(self) -> None:
         """ 开始执行 """
-
         try:
             if not self._current_case:
                 QtWidgets.QMessageBox.information(self, "未选择", "请先选择用例")
@@ -1918,7 +1911,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return
             if monitoring_actions:
-                self.setting_log_Button(False)
                 self._monitoring.start(
                     self._current_case.case_id,
                     monitoring_actions,
@@ -2001,6 +1993,7 @@ class MainWindow(QtWidgets.QMainWindow):
         message = "\n".join(errors) if errors else "请上传可识别的录音文件。"
         QtWidgets.QMessageBox.warning(self, "录音不符合要求", message)
         return False
+
     def _submit_result(self, result: str) -> None:
         """ 更新结果 """
         if not self._current_case:
@@ -2016,7 +2009,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 "监控尚未完成，暂不能标记通过。",
             )
             return
-
         try:
             actions = parse_keywords(self._current_case.keyword_actions())
         except ValidationError as exc:
@@ -2101,7 +2093,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # 强制等待保证稳定性
         time.sleep(0.2)
         self._set_action_buttons_mode(False)
-        self.setting_log_Button(True)
 
     def _reload_current_plan(self) -> None:
         """ 计划重载 """

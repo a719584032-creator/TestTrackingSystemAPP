@@ -116,7 +116,6 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
                     f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。"
                 )
                 log_num = total
-
             if total >= target_cycles:
                 context._record_count_progress(target_cycles, total, action_key="s4记时")
                 context.log(f"已完成目标S4次数: {target_cycles:g}")
