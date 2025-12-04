@@ -558,7 +558,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         audio_row = QtWidgets.QHBoxLayout()
         audio_row.setSpacing(8)
-        audio_row.addWidget(QtWidgets.QLabel("Lab Audio 日志:"), 0, QtCore.Qt.AlignVCenter)
+
+        # 2. 分离QLabel实例：先创建对象并赋值给变量，便于后续修改
+        self.audio_label = QtWidgets.QLabel("Lab Audio 日志:")  # 初始文本
+        # 可选：提前设置对齐方式（和原代码一致）
+        self.audio_label.setAlignment(QtCore.Qt.AlignVCenter)
+        audio_row.addWidget(self.audio_label, 0, QtCore.Qt.AlignVCenter)
+        # audio_row.addWidget(QtWidgets.QLabel("Lab Audio 日志:"), 0, QtCore.Qt.AlignVCenter)
         self._audio_log_status = QtWidgets.QLabel("未选择")
         self._audio_log_status.setStyleSheet("color: #6B7280;")
         self._audio_log_status.setWordWrap(True)
@@ -724,7 +730,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pending_audio_logs = None
         else:
             self._update_audio_log_hint()
-
+    #--------------------------------------------------------------------
+    '''去除log日志中的重复文件'''
+    def Remove_duplicate_files(self):
+        unique_list = list(dict.fromkeys(self._audio_log_files))
+        return unique_list
+    #----------------------------------------------------------------------
     def _set_audio_log_files(self, files: Sequence[str]) -> None:
         deduped: List[str] = []
         seen: set[str] = set()
@@ -736,8 +747,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             seen.add(normalized)
             deduped.append(normalized)
-        # self._audio_log_files = deduped
         self._audio_log_files.extend(deduped)
+        self._audio_log_files=self.Remove_duplicate_files()
         if deduped:
             directory = os.path.dirname(deduped[-1])
             if directory:
@@ -771,7 +782,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self,
             "选择 Lab Audio 日志文件",
             self._audio_log_dir_hint,
-            "Log files (*.log *.txt);;All files (*)",
+            "Log files (*.log *.txt) ;; HTML files (*.html) ;; All files (*)",
         )
 
         if not files:
@@ -1743,6 +1754,18 @@ class MainWindow(QtWidgets.QMainWindow):
             parts.append(f"[{keywords}]")
         return " ".join(parts)
 
+    # 对测试关键字判别进行Log日志标签进行替换
+    def change_log_label(self,entry):
+        def logkeywords(x):
+            if 'log' in x.lower():
+                return True
+            else:
+                return False
+        if True in list(map(logkeywords, entry.case.keywords)):
+            self.audio_label.setText("Log/Html 日志:")
+        else:
+            self.audio_label.setText("Lab Audio 日志:")
+
     def _on_case_selected(
         self,
         current: Optional[QtWidgets.QTreeWidgetItem],
@@ -1759,6 +1782,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # 记录选中的ID，并更新用例详情。根据是否点击来决定调用开始执行
         case = entry.case
         self._logger.info("选中用例: %s (ID: %s)", case.title, case.case_id)
+        self.change_log_label(entry)
         self._update_case_detail(entry)
         self.save_state()
         if self._restore_start_clicked:
