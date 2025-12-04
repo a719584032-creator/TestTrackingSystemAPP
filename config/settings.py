@@ -9,12 +9,11 @@ from .paths import get_patvs_root
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 CONFIG_DIR = Path.home() / ".tts_client"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
 DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
-
 
 @dataclass(slots=True)
 class ApiSettings:
