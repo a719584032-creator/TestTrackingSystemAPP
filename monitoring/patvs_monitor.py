@@ -1017,6 +1017,8 @@ class Patvs_Fuction:
                         ).start()
                     else:
                         self.log(f"未匹配到任何监控事项，请检查 {action} 填写是否正确")
+                        # 未匹配到的动作视为无需拦截，直接标记完成并放行
+                        self._update_current_action_remaining(0)
                         self.action_complete.set()
                     # 等待线程完成
                     self.action_complete.wait()

@@ -163,25 +163,43 @@ class ResultDialog(QtWidgets.QDialog):
     # ------------------------------------------------------------------
     def _add_attachment(self) -> None:
         """ 添加附件 """
+        max_size_bytes = 50 * 1024 * 1024
+        current_total = 0
+        for payload in self._attachments:
+            path = payload.get("local_path")
+            if not path:
+                continue
+            try:
+                current_total += Path(path).stat().st_size
+            except OSError:
+                continue
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "选择附件",
             os.path.expanduser("~"),
             "All Files (*)",
         )
-        p_size=0
         for path in files:
+            try:
+                file_size = Path(path).stat().st_size
+            except OSError as exc:
+                QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
+                continue
+            if file_size > max_size_bytes:
+                QtWidgets.QMessageBox.warning(self, "文件过大", "请勿上传大于50MB的文件")
+                continue
+            if current_total + file_size > max_size_bytes:
+                QtWidgets.QMessageBox.warning(self, "文件过大", "附件总大小不可超过50MB，请移除部分文件后重试。")
+                continue
             try:
                 payload = encode_attachment(path)
             except OSError as exc:  # pragma: no cover - 文件 IO 在测试环境难以稳定复现
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
             payload["local_path"] = path
-            p_size+=Path((path)).stat().st_size
-            if p_size > 1024*1024*50:
-                QtWidgets.QMessageBox.warning(self, "文件过大", "请勿上传大于50MB的文件")
             self._attachments.append(payload)
             self._attachment_list.addItem(os.path.basename(path))
+            current_total += file_size
 
     def _remove_attachment(self) -> None:
         """ 删除附件 """
@@ -262,6 +280,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pending_audio_logs: Optional[List[str]] = None
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
         self._recording_requirement_minutes: Optional[float] = None
+        self._refresh_in_progress = False
+        self._status_bar: Optional[QtWidgets.QStatusBar] = None
         self._pending_update_info: Optional[UpdateInfo] = None
         self._staged_update_path: Optional[Path] = None
         self._download_dialog: Optional[QtWidgets.QProgressDialog] = None
@@ -351,9 +371,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._result_filter.addItem(value, value)
         filter_layout.addWidget(self._result_filter, 1, 5)
 
-        self._refresh_btn = QtWidgets.QPushButton("刷新计划数据")
+        self._refresh_btn = QtWidgets.QPushButton("刷新数据")
         self._refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
-        self._refresh_btn.clicked.connect(self._reload_current_plan)
+        self._refresh_btn.clicked.connect(self._refresh_all_data)
         filter_layout.addWidget(self._refresh_btn, 0, 6, 2, 1)
 
         filter_layout.setColumnStretch(1, 1)
@@ -626,6 +646,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 状态栏
         status = QtWidgets.QStatusBar()
+        self._status_bar = status
         self.setStatusBar(status)
         status.clearMessage()
 
@@ -667,7 +688,8 @@ class MainWindow(QtWidgets.QMainWindow):
     # 执行按钮状态相关
     def _refresh_start_button_state(self) -> None:
         # 开始执行按钮，有监控动作/执行未被锁定 才能使用
-        enabled = bool(self._current_actions) and not self._execution_locked
+        # enabled = bool(self._current_actions) and not self._execution_locked
+        enabled = not self._execution_locked
         self._start_monitor_btn.setEnabled(enabled)
 
     def _set_action_buttons_mode(self, running: bool) -> None:
@@ -709,11 +731,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self._directory_filter,
             self._result_filter,
             self._refresh_btn,
+            self._select_audio_logs_btn,
+            self._clear_audio_logs_btn,
         ]
         for widget in widgets:
             widget.setEnabled(not locked)
         self._case_tree.setDisabled(locked)
         self._refresh_start_button_state()
+
+    def _set_refresh_ui_state(self, refreshing: bool) -> None:
+        """ 刷新按钮与状态栏提示 """
+        self._refresh_in_progress = refreshing
+        if refreshing:
+            self._refresh_btn.setText("刷新中...")
+            self._refresh_btn.setEnabled(False)
+            if self._status_bar:
+                self._status_bar.showMessage("正在刷新数据，请稍候...")
+        else:
+            self._refresh_btn.setText("刷新数据")
+            self._refresh_btn.setEnabled(True)
+            if self._status_bar:
+                self._status_bar.clearMessage()
 
     def _apply_pending_audio_logs(self) -> None:
         # 判断 restore_state 是否有运行中的 audio 日志
@@ -1062,17 +1100,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_combo.setCurrentIndex(target_index)
 
     # ------------------------------------------------------------------
-    def _load_departments(self) -> None:
+    def _load_departments(self) -> bool:
         """ 获取部门信息 """
+        success = False
         try:
             self._departments = self._api.get_departments()
         except AuthenticationError:
             QtWidgets.QMessageBox.critical(self, "未授权", "凭据已失效，请重新登录。")
             self.close()
-            return
+            return False
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载失败", str(exc))
-            return
+            return False
         with QtCore.QSignalBlocker(self._department_combo):
             self._department_combo.clear()
             self._department_combo.addItem("请选择部门", None)
@@ -1093,6 +1132,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._clear_project_and_plan()
         self._restore_department_id = None
         self.save_state()
+        success = True
+        return success
 
     def _on_department_changed(self, _index: object) -> None:
         """ 联动筛选框，部门改变时重新获取项目 """
@@ -1872,9 +1913,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self._current_case:
                 QtWidgets.QMessageBox.information(self, "未选择", "请先选择用例")
                 return
-            if not self._current_actions:
-                QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
-                return
+            # 需求要求不拦截，先注释掉
+            # if not self._current_actions:
+            #     QtWidgets.QMessageBox.warning(self, "关键字错误", "关键字无法解析，无法启动监控")
+            #     return
             if self._current_entry:
                 result_text = self._existing_result_label(self._current_entry)
                 if result_text and not self._auto_start_in_progress:
@@ -1920,7 +1962,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._append_log("监控已启动")
                 self._logger.info("已启动监控: 用例 %s", self._current_case.case_id)
             else:
-                self._append_log("当前用例无需自动监控，提交附件后可以直接记录结果。")
+                self._append_log("当前用例没有匹配到任何监控动作，可以直接记录结果。")
             self._set_action_buttons_mode(True)
             self._set_execution_lock(True)
             self.save_state()
@@ -2108,6 +2150,33 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._pending_filter_state:
                 # 如果计划重新加载过程中未使用这些值，确保不要遗留旧状态。
                 self._pending_filter_state = None
+
+    def _refresh_all_data(self) -> None:
+        """ 手动刷新部门/项目/计划及用例数据 """
+        if self._refresh_in_progress:
+            return
+        self._set_refresh_ui_state(True)
+        refreshed = False
+        self._pending_selection = self._selection_key(self._current_entry)
+        self._pending_filter_state = {
+            "directory": self._directory_filter.currentData(),
+            "device": self._device_filter.currentData(),
+            "result": self._result_filter.currentData(),
+        }
+        self._restore_department_id = self._int_or_none(self._department_combo.currentData())
+        self._restore_project_id = self._int_or_none(self._project_combo.currentData())
+        self._restore_plan_id = self._int_or_none(self._plan_combo.currentData())
+        try:
+            refreshed = bool(self._load_departments())
+        finally:
+            self._set_refresh_ui_state(False)
+        if refreshed:
+            if self._status_bar:
+                self._status_bar.showMessage("数据已刷新", 5000)
+            QtWidgets.QMessageBox.information(self, "刷新完成", "最新的部门、项目、计划及用例数据已更新。")
+        else:
+            if self._status_bar:
+                self._status_bar.showMessage("刷新失败，请稍后重试", 5000)
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
