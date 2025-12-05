@@ -1,11 +1,15 @@
 """将监控关键字解析成可执行的监控动作。"""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence, Tuple
 
 from utils.exceptions import ValidationError
 from .audio_event_constants import EVENT_SPECS
+
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize(value: str) -> str:
@@ -141,7 +145,7 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
     """将关键字 token 转换为监控动作。
 
     期望格式为 ``动作+次数``，也支持多步骤组合如 ``S3+USB+5``。
-    解析或校验失败会抛出 :class:`ValidationError`，并告知问题 token。
+    解析格式错误会抛出 :class:`ValidationError`。不支持的监控动作将被忽略。
     """
 
     actions: List[MonitoringAction] = []
@@ -182,20 +186,16 @@ def parse_keywords(tokens: Sequence[str]) -> List[MonitoringAction]:
                 raw=token,
             )
         )
-    if format_errors or unsupported:
-        messages: List[str] = []
-        if format_errors:
-            messages.append(
-                "关键字解析错误: " + ", ".join(format_errors) + "。请使用 '动作+次数' 的格式"
-            )
-        if unsupported:
-            messages.append(
-                "存在不支持的监控动作: "
-                + ", ".join(unsupported)
-                + "。支持的动作: "
-                + ", ".join(sorted(SUPPORTED_ACTIONS))
-            )
-        raise ValidationError("；".join(messages))
+    if format_errors:
+        message = "关键字解析错误: " + ", ".join(format_errors) + "。请使用 '动作+次数' 的格式"
+        raise ValidationError(message)
+
+    if unsupported:
+        logger.info(
+            "Ignoring unsupported monitoring actions: %s; supported actions: %s",
+            ", ".join(unsupported),
+            ", ".join(sorted(SUPPORTED_ACTIONS)),
+        )
 
     return actions
 

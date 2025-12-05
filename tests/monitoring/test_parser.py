@@ -73,11 +73,12 @@ class ParseKeywordsTests(unittest.TestCase):
         self.assertIn("HEADSET_POWER_ON", label)
         self.assertIn("耳机拨动开机", label)
 
-    def test_unsupported_action_raises_validation_error(self):
-        with self.assertRaises(ValidationError) as exc_info:
-            parse_keywords(["Unknown+2"])
+    def test_unsupported_action_is_ignored(self):
+        actions = parse_keywords(["Unknown+2", "S3+1"])
 
-        self.assertIn("不支持", str(exc_info.exception))
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].name, "S3")
+        self.assertEqual(actions[0].amount, 1.0)
 
     def test_hdmi_hotplug_keyword_supported(self):
         actions = parse_keywords(["显示器插拔+2"])

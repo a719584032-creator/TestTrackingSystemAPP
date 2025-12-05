@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -77,6 +77,23 @@ class CaseDisplayEntry:
         if self.is_general and self.case.latest_result:
             return self.case.latest_result.lower()
         return "pending"
+
+
+@dataclass(slots=True)
+class RefreshResult:
+    """后台刷新请求的结果载体（跨线程传递）。"""
+
+    departments: List[Department] = field(default_factory=list)
+    projects: List[Project] = field(default_factory=list)
+    plans: List[TestPlan] = field(default_factory=list)
+    plan_detail: Optional[PlanDetail] = None
+    cases: List[PlanCase] = field(default_factory=list)
+    selected_department_id: Optional[int] = None
+    selected_project_id: Optional[int] = None
+    selected_plan_id: Optional[int] = None
+    message: Optional[str] = None
+    auth_error: bool = False
+    success: bool = False
 
 
 class ResultDialog(QtWidgets.QDialog):
@@ -236,6 +253,7 @@ class ResultDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     """ 执行主窗口UI """
     _current_actions: list[MonitoringAction]
+    _refresh_complete_signal = QtCore.pyqtSignal(object)
     # OTA 更新相关
     _update_prompt_signal = QtCore.pyqtSignal(object)
     _update_progress_signal = QtCore.pyqtSignal(int, object)
@@ -281,6 +299,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
         self._recording_requirement_minutes: Optional[float] = None
         self._refresh_in_progress = False
+        self._refresh_spinner_timer = QtCore.QTimer(self)
+        self._refresh_spinner_timer.setInterval(120)
+        self._refresh_spinner_timer.timeout.connect(self._update_refresh_spinner)
+        self._refresh_spinner_angle = 0
+        self._refresh_icon_base: Optional[QtGui.QPixmap] = None
         self._status_bar: Optional[QtWidgets.QStatusBar] = None
         self._pending_update_info: Optional[UpdateInfo] = None
         self._staged_update_path: Optional[Path] = None
@@ -288,7 +311,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_check_thread: Optional[threading.Thread] = None
         self._update_download_thread: Optional[threading.Thread] = None
 
-        # OTA 更新
+        # 信号连接（刷新/OTA）
+        self._refresh_complete_signal.connect(self._on_refresh_complete)
         self._update_prompt_signal.connect(self._prompt_update)
         self._update_progress_signal.connect(self._update_download_progress)
         self._update_ready_signal.connect(self._on_update_ready)
@@ -372,7 +396,10 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.addWidget(self._result_filter, 1, 5)
 
         self._refresh_btn = QtWidgets.QPushButton("刷新数据")
-        self._refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        refresh_icon = self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload)
+        self._refresh_icon_base = refresh_icon.pixmap(20, 20)
+        self._refresh_btn.setIcon(refresh_icon)
+        self._refresh_btn.setIconSize(QtCore.QSize(20, 20))
         self._refresh_btn.clicked.connect(self._refresh_all_data)
         filter_layout.addWidget(self._refresh_btn, 0, 6, 2, 1)
 
@@ -745,13 +772,39 @@ class MainWindow(QtWidgets.QMainWindow):
         if refreshing:
             self._refresh_btn.setText("刷新中...")
             self._refresh_btn.setEnabled(False)
+            self._start_refresh_spinner()
             if self._status_bar:
                 self._status_bar.showMessage("正在刷新数据，请稍候...")
         else:
             self._refresh_btn.setText("刷新数据")
             self._refresh_btn.setEnabled(True)
+            self._stop_refresh_spinner()
             if self._status_bar:
                 self._status_bar.clearMessage()
+
+    def _start_refresh_spinner(self) -> None:
+        """启动刷新按钮的转圈效果，反馈正在刷新。"""
+        self._refresh_spinner_angle = 0
+        if self._refresh_icon_base is None:
+            icon = self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload)
+            self._refresh_icon_base = icon.pixmap(20, 20)
+        self._refresh_spinner_timer.start()
+        self._update_refresh_spinner()
+
+    def _stop_refresh_spinner(self) -> None:
+        """停止转圈效果，恢复默认图标。"""
+        self._refresh_spinner_timer.stop()
+        if self._refresh_icon_base is not None:
+            self._refresh_btn.setIcon(QtGui.QIcon(self._refresh_icon_base))
+
+    def _update_refresh_spinner(self) -> None:
+        """旋转刷新图标，提供转圈视觉提示。"""
+        if not self._refresh_icon_base:
+            return
+        self._refresh_spinner_angle = (self._refresh_spinner_angle + 30) % 360
+        transform = QtGui.QTransform().rotate(self._refresh_spinner_angle)
+        rotated = self._refresh_icon_base.transformed(transform, QtCore.Qt.SmoothTransformation)
+        self._refresh_btn.setIcon(QtGui.QIcon(rotated))
 
     def _apply_pending_audio_logs(self) -> None:
         # 判断 restore_state 是否有运行中的 audio 日志
@@ -2156,27 +2209,372 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._refresh_in_progress:
             return
         self._set_refresh_ui_state(True)
-        refreshed = False
         self._pending_selection = self._selection_key(self._current_entry)
         self._pending_filter_state = {
             "directory": self._directory_filter.currentData(),
             "device": self._device_filter.currentData(),
             "result": self._result_filter.currentData(),
         }
-        self._restore_department_id = self._int_or_none(self._department_combo.currentData())
-        self._restore_project_id = self._int_or_none(self._project_combo.currentData())
-        self._restore_plan_id = self._int_or_none(self._plan_combo.currentData())
+        restore_department_id = self._int_or_none(self._department_combo.currentData())
+        restore_project_id = self._int_or_none(self._project_combo.currentData())
+        restore_plan_id = self._int_or_none(self._plan_combo.currentData())
+        self._restore_department_id = restore_department_id
+        self._restore_project_id = restore_project_id
+        self._restore_plan_id = restore_plan_id
+        thread = threading.Thread(
+            target=self._refresh_all_data_worker,
+            args=(restore_department_id, restore_project_id, restore_plan_id),
+            name="RefreshData",
+            daemon=True,
+        )
+        thread.start()
+
+    def _refresh_all_data_worker(
+        self,
+        department_id: Optional[int],
+        project_id: Optional[int],
+        plan_id: Optional[int],
+    ) -> None:
+        """后台线程：获取刷新所需的数据后通知主线程应用。"""
+
+        result = RefreshResult(
+            selected_department_id=department_id,
+            selected_project_id=project_id,
+            selected_plan_id=plan_id,
+        )
         try:
-            refreshed = bool(self._load_departments())
-        finally:
-            self._set_refresh_ui_state(False)
-        if refreshed:
+            result.departments = self._api.get_departments()
+        except AuthenticationError:
+            result.auth_error = True
+            result.message = "凭据已失效，请重新登录。"
+            self._refresh_complete_signal.emit(result)
+            return
+        except ClientError as exc:
+            result.message = str(exc)
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover - 网络请求异常难以稳定复现
+            self._logger.exception("刷新部门列表失败: %s", exc)
+            result.message = f"刷新失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        result.success = True  # 部门列表获取成功即认为基础刷新成功
+        valid_department_ids = {
+            self._int_or_none(getattr(dept, "id", None)) for dept in result.departments
+        }
+        if department_id not in valid_department_ids:
+            department_id = None
+        result.selected_department_id = department_id
+        if department_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.projects = self._api.get_projects(int(department_id))
+        except ClientError as exc:
+            result.message = f"加载项目失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新项目列表失败: %s", exc)
+            result.message = f"刷新项目失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        valid_project_ids = {
+            self._int_or_none(getattr(project, "id", None)) for project in result.projects
+        }
+        if project_id not in valid_project_ids:
+            project_id = None
+        result.selected_project_id = project_id
+        if project_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.plans = self._api.get_test_plans(int(department_id), int(project_id))
+        except ClientError as exc:
+            result.message = f"加载计划失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新计划列表失败: %s", exc)
+            result.message = f"刷新计划失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        valid_plan_ids = {self._int_or_none(getattr(plan, "id", None)) for plan in result.plans}
+        if plan_id not in valid_plan_ids:
+            plan_id = None
+        result.selected_plan_id = plan_id
+        if plan_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.plan_detail = self._api.get_plan_detail(int(plan_id))
+        except AuthenticationError:
+            result.auth_error = True
+            result.message = "凭据已失效，请重新登录。"
+            self._refresh_complete_signal.emit(result)
+            return
+        except ClientError as exc:
+            result.message = f"加载计划详情失败: {exc}"
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新计划详情失败: %s", exc)
+            result.message = f"刷新计划详情失败: {exc}"
+
+        try:
+            result.cases = self._api.get_plan_cases(int(plan_id))
+        except ClientError as exc:
+            result.message = f"加载用例失败: {exc}"
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新用例列表失败: %s", exc)
+            result.message = f"刷新用例失败: {exc}"
+        else:
+            self._logger.info("计划 %s 用例数量: %d", plan_id, len(result.cases))
+
+        self._refresh_complete_signal.emit(result)
+
+    def _on_refresh_complete(self, result: RefreshResult) -> None:
+        """在主线程应用刷新结果，停止转圈动画。"""
+
+        self._set_refresh_ui_state(False)
+
+        if result is None:
+            if self._status_bar:
+                self._status_bar.showMessage("刷新失败，请稍后重试", 5000)
+            return
+
+        if result.auth_error:
+            QtWidgets.QMessageBox.critical(self, "未授权", "凭据已失效，请重新登录。")
+            self.close()
+            return
+
+        self._apply_refresh_result(result)
+
+        if result.message:
+            QtWidgets.QMessageBox.warning(self, "刷新异常", result.message)
+            if self._status_bar:
+                self._status_bar.showMessage(result.message, 5000)
+            return
+
+        if result.success:
             if self._status_bar:
                 self._status_bar.showMessage("数据已刷新", 5000)
             QtWidgets.QMessageBox.information(self, "刷新完成", "最新的部门、项目、计划及用例数据已更新。")
         else:
             if self._status_bar:
                 self._status_bar.showMessage("刷新失败，请稍后重试", 5000)
+
+    def _apply_refresh_result(self, result: RefreshResult) -> None:
+        """将后台线程的刷新结果应用到界面控件。"""
+
+        # 如果上游未选择部门/项目/计划，则确保下游数据清空，避免残留。
+        if result.selected_department_id is None:
+            result.projects = []
+            result.plans = []
+            result.plan_detail = None
+            result.cases = []
+        elif result.selected_project_id is None:
+            result.plans = []
+            result.plan_detail = None
+            result.cases = []
+        elif result.selected_plan_id is None:
+            result.plan_detail = None
+            result.cases = []
+
+        self._departments = result.departments or []
+        self._projects = result.projects or []
+        self._plans = result.plans or []
+        self._plan_detail = result.plan_detail
+        self._cases = result.cases or []
+
+        self._restore_department_id = result.selected_department_id
+        self._restore_project_id = result.selected_project_id
+        self._restore_plan_id = result.selected_plan_id
+
+        self._rebuild_department_combo()
+        self._rebuild_project_combo()
+        self._rebuild_plan_combo()
+
+        self._update_plan_summary()
+        self._refresh_directory_filter()
+        self._refresh_device_filter()
+        self._restore_pending_filters()
+        self._apply_filters()
+        self.save_state()
+
+    def _rebuild_department_combo(self) -> None:
+        """使用后台刷新数据更新部门下拉框，阻止信号触发重复请求。"""
+
+        with QtCore.QSignalBlocker(self._department_combo):
+            self._department_combo.clear()
+            self._department_combo.addItem("请选择部门", None)
+            for dept in self._departments:
+                self._department_combo.addItem(dept.name, getattr(dept, "id", None))
+            target_index = 0
+            if self._restore_department_id is not None:
+                restored_index = self._department_combo.findData(self._restore_department_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._department_combo.setCurrentIndex(target_index)
+        self._department_combo.setEnabled(bool(self._departments))
+        self._restore_department_id = None
+
+    def _rebuild_project_combo(self) -> None:
+        """使用后台刷新数据更新项目下拉框，阻止信号触发重复请求。"""
+
+        self._clear_project_combo()
+        if not self._projects:
+            self._restore_project_id = None
+            self._restore_plan_id = None
+            return
+
+        with QtCore.QSignalBlocker(self._project_combo):
+            self._project_combo.clear()
+            self._project_combo.addItem("请选择项目", None)
+            for project in self._projects:
+                self._project_combo.addItem(project.name, getattr(project, "id", None))
+            target_index = 0
+            if self._restore_project_id is not None:
+                restored_index = self._project_combo.findData(self._restore_project_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._project_combo.setCurrentIndex(target_index)
+        self._project_combo.setEnabled(True)
+        self._restore_project_id = None
+
+    def _rebuild_plan_combo(self) -> None:
+        """使用后台刷新数据更新计划下拉框，阻止信号触发重复请求。"""
+
+        self._clear_plan_combo()
+        if not self._plans:
+            self._restore_plan_id = None
+            return
+
+        with QtCore.QSignalBlocker(self._plan_combo):
+            self._plan_combo.clear()
+            self._plan_combo.addItem("请选择计划", None)
+            for plan in self._plans:
+                self._plan_combo.addItem(plan.name, getattr(plan, "id", None))
+            target_index = 0
+            if self._restore_plan_id is not None:
+                restored_index = self._plan_combo.findData(self._restore_plan_id)
+                if restored_index >= 0:
+                    target_index = restored_index
+            self._plan_combo.setCurrentIndex(target_index)
+        self._plan_combo.setEnabled(True)
+        self._restore_plan_id = None
+
+    def _refresh_all_data_worker(
+        self,
+        department_id: Optional[int],
+        project_id: Optional[int],
+        plan_id: Optional[int],
+    ) -> None:
+        """后台线程：获取刷新所需的数据后通知主线程应用。"""
+
+        result = RefreshResult(
+            selected_department_id=department_id,
+            selected_project_id=project_id,
+            selected_plan_id=plan_id,
+        )
+        try:
+            result.departments = self._api.get_departments()
+        except AuthenticationError:
+            result.auth_error = True
+            result.message = "凭据已失效，请重新登录。"
+            self._refresh_complete_signal.emit(result)
+            return
+        except ClientError as exc:
+            result.message = str(exc)
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover - 网络请求异常难以稳定复现
+            self._logger.exception("刷新部门列表失败: %s", exc)
+            result.message = f"刷新失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        result.success = True  # 部门列表获取成功即认为基础刷新成功
+        valid_department_ids = {
+            self._int_or_none(getattr(dept, "id", None)) for dept in result.departments
+        }
+        if department_id not in valid_department_ids:
+            department_id = None
+        result.selected_department_id = department_id
+        if department_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.projects = self._api.get_projects(int(department_id))
+        except ClientError as exc:
+            result.message = f"加载项目失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新项目列表失败: %s", exc)
+            result.message = f"刷新项目失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        valid_project_ids = {
+            self._int_or_none(getattr(project, "id", None)) for project in result.projects
+        }
+        if project_id not in valid_project_ids:
+            project_id = None
+        result.selected_project_id = project_id
+        if project_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.plans = self._api.get_test_plans(int(department_id), int(project_id))
+        except ClientError as exc:
+            result.message = f"加载计划失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新计划列表失败: %s", exc)
+            result.message = f"刷新计划失败: {exc}"
+            self._refresh_complete_signal.emit(result)
+            return
+
+        valid_plan_ids = {self._int_or_none(getattr(plan, "id", None)) for plan in result.plans}
+        if plan_id not in valid_plan_ids:
+            plan_id = None
+        result.selected_plan_id = plan_id
+        if plan_id is None:
+            self._refresh_complete_signal.emit(result)
+            return
+
+        try:
+            result.plan_detail = self._api.get_plan_detail(int(plan_id))
+        except AuthenticationError:
+            result.auth_error = True
+            result.message = "凭据已失效，请重新登录。"
+            self._refresh_complete_signal.emit(result)
+            return
+        except ClientError as exc:
+            result.message = f"加载计划详情失败: {exc}"
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新计划详情失败: %s", exc)
+            result.message = f"刷新计划详情失败: {exc}"
+
+        try:
+            result.cases = self._api.get_plan_cases(int(plan_id))
+        except ClientError as exc:
+            result.message = f"加载用例失败: {exc}"
+        except Exception as exc:  # pragma: no cover
+            self._logger.exception("刷新用例列表失败: %s", exc)
+            result.message = f"刷新用例失败: {exc}"
+        else:
+            self._logger.info("计划 %s 用例数量: %d", plan_id, len(result.cases))
+
+        self._refresh_complete_signal.emit(result)
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
