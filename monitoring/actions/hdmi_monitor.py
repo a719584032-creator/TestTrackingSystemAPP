@@ -179,7 +179,7 @@ def run(
             context.log(
                 f"检测到显示器状态变化（开始）：之前 {len(last_snapshot)} 台，当前 {len(current_snapshot)} 台。"
             )
-            # 可选的详细日志（已注释）
+            # 详细日志
             # if last_snapshot:
             #     context.log(f"之前: {', '.join(last_snapshot)}")
             # if current_snapshot:
