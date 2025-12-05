@@ -299,6 +299,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
         self._recording_requirement_minutes: Optional[float] = None
         self._refresh_in_progress = False
+        self._device_filter_required = False
         self._refresh_spinner_timer = QtCore.QTimer(self)
         self._refresh_spinner_timer.setInterval(120)
         self._refresh_spinner_timer.timeout.connect(self._update_refresh_spinner)
@@ -375,17 +376,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
         filter_layout.addWidget(self._plan_combo, 0, 5)
 
-        filter_layout.addWidget(QtWidgets.QLabel("机型"), 1, 0)
-        self._device_filter = QtWidgets.QComboBox()
-        self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._device_filter.setMinimumWidth(200)
-        filter_layout.addWidget(self._device_filter, 1, 1)
-
-        filter_layout.addWidget(QtWidgets.QLabel("模块目录"), 1, 2)
+        filter_layout.addWidget(QtWidgets.QLabel("模块目录"), 1, 0)
         self._directory_filter = QtWidgets.QComboBox()
         self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
         self._directory_filter.addItem("请选择模块目录", None)
-        filter_layout.addWidget(self._directory_filter, 1, 3)
+        filter_layout.addWidget(self._directory_filter, 1, 1)
+
+        filter_layout.addWidget(QtWidgets.QLabel("机型"), 1, 2)
+        self._device_filter = QtWidgets.QComboBox()
+        self._device_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+        self._device_filter.setMinimumWidth(200)
+        filter_layout.addWidget(self._device_filter, 1, 3)
 
         filter_layout.addWidget(QtWidgets.QLabel("结果"), 1, 4)
         self._result_filter = QtWidgets.QComboBox()
@@ -762,7 +763,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._clear_audio_logs_btn,
         ]
         for widget in widgets:
-            widget.setEnabled(not locked)
+            if widget is self._device_filter:
+                widget.setEnabled(not locked and self._device_filter_required)
+            else:
+                widget.setEnabled(not locked)
         self._case_tree.setDisabled(locked)
         self._refresh_start_button_state()
 
@@ -1324,13 +1328,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_device_filter(self) -> None:
         """ 设备过滤筛选 """
         devices: Dict[int, str] = {}
+        requires_device_filter = False
         # 从所有case中提取设备ID和名称
         for case in self._cases:
+            compatibility_enabled = bool(getattr(case, "compatibility_testing", False))
+            case_has_devices = False
             for model in case.device_models:
                 if getattr(model, "id", None) is None:
                     continue
                 label = self._format_device_label(model.name, model.model_code, model.id)
                 devices[int(model.id)] = label
+                case_has_devices = True
+            if compatibility_enabled and case_has_devices:
+                requires_device_filter = True
             for execution in case.execution_results or []:
                 if not execution.device_model_id:
                     continue
@@ -1342,13 +1352,16 @@ class MainWindow(QtWidgets.QMainWindow):
                         device_id,
                     )
                     devices[device_id] = label
+                if compatibility_enabled and case_has_devices:
+                    requires_device_filter = True
 
+        self._device_filter_required = bool(devices) and requires_device_filter
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
         self._device_filter.addItem("请选择机型", None)
         for device_id, label in sorted(devices.items(), key=lambda item: item[1]):
             self._device_filter.addItem(label, device_id)
-        self._device_filter.setEnabled(True)
+        self._device_filter.setEnabled(self._device_filter_required)
         self._device_filter.blockSignals(False)
         self._device_filter.setCurrentIndex(0)
 
@@ -1435,6 +1448,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # executed_at最大的就是最新的结果
         return max(candidates, key=lambda item: item.executed_at or "")
 
+    def _latest_execution_any(
+        self, executions: Sequence[CaseExecutionResult]
+    ) -> Optional[CaseExecutionResult]:
+        """返回最新的执行结果（不区分设备）。"""
+
+        if not executions:
+            return None
+        return max(executions, key=lambda item: item.executed_at or "")
+
     def _build_case_entries(self, case: PlanCase) -> List[CaseDisplayEntry]:
         """
         核心：一个 case 可能对应多个“执行设备”的行（一个 case + 多机型，树里每个 entry 一行）
@@ -1445,13 +1467,18 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         entries: List[CaseDisplayEntry] = []
         executions = case.execution_results or []
-        device_models = {
-            model.id: model
-            for model in case.device_models
-            if getattr(model, "id", None)
-        }
+        compatibility_enabled = bool(getattr(case, "compatibility_testing", False))
+        device_models = (
+            {
+                model.id: model
+                for model in case.device_models
+                if getattr(model, "id", None)
+            }
+            if compatibility_enabled
+            else {}
+        )
 
-        if device_models:
+        if compatibility_enabled and device_models:
             seen_devices: set[int] = set()
             for device_id, model in device_models.items():
                 execution = self._latest_execution_for_device(executions, device_id)
@@ -1498,7 +1525,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 seen_devices.add(device_id)
 
             if not entries:
-                execution = self._latest_execution_for_device(executions, None)
+                execution = self._latest_execution_any(executions)
                 entries.append(
                     CaseDisplayEntry(
                         case=case,
@@ -1511,7 +1538,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             return entries
 
-        execution = self._latest_execution_for_device(executions, None)
+        execution = self._latest_execution_any(executions)
         entries.append(
             CaseDisplayEntry(
                 case=case,
@@ -1527,14 +1554,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_filters(self) -> None:
         """ 应用筛选：目录、设备、结果过滤用例 """
         directory_value = self._directory_filter.currentData()
-        device_value = self._device_filter.currentData()
+        device_value = self._device_filter.currentData() if self._device_filter_required else None
         result_value = self._result_filter.currentData()
-
-        if device_value is None and self._device_filter.isEnabled():
-            self._filtered_entries = []
-            self._refresh_case_tree()
-            self.save_state()
-            return
 
         entries: List[CaseDisplayEntry] = []
         for case in self._cases:
@@ -1542,6 +1563,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             case_entries = self._build_case_entries(case)
             for entry in case_entries:
+                if device_value is None and self._device_filter_required and not entry.is_general:
+                    # 未选择机型时仅展示通用用例，避免误显示设备特定记录
+                    continue
                 if device_value is not None:
                     if isinstance(device_value, int):
                         if not entry.is_general and entry.device_model_id != int(device_value):

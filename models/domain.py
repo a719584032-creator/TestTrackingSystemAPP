@@ -313,7 +313,7 @@ class PlanCase:
     preconditions: Optional[str]
     expected_result: Optional[str]
     include: bool
-    require_all_devices: bool
+    compatibility_testing: bool
     order_no: Optional[int]
     plan_id: Optional[int]
     keywords: List[str] = field(default_factory=list)
@@ -334,7 +334,7 @@ class PlanCase:
             preconditions=payload.get("preconditions"),
             expected_result=payload.get("expected_result"),
             include=payload.get("include", True),
-            require_all_devices=payload.get("require_all_devices", False),
+            compatibility_testing=bool(payload.get("compatibility_testing", False)),
             order_no=payload.get("order_no"),
             plan_id=payload.get("plan_id"),
             keywords=list(payload.get("keywords") or []),
