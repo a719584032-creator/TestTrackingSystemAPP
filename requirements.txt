@@ -10,3 +10,4 @@ PyQt5
 pywin32
 requests
 screen-brightness-control
+anyio
