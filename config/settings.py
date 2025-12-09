@@ -6,11 +6,24 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .paths import get_patvs_root
+from utils.instance_allocator import ensure_instance_paths
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.8"
-CONFIG_DIR = Path.home() / ".tts_client"
+APP_VERSION = "2.0.2"
+
+# 确保在加载配置前完成实例目录分配，避免多实例共享同一根目录
+ensure_instance_paths()
+
+
+def _get_config_dir() -> Path:
+    """配置目录优先使用环境变量"""
+
+    config_env = os.environ.get("TTS_CONFIG_DIR")
+    return Path(config_env) if config_env else Path.home() / ".tts_client"
+
+
+CONFIG_DIR = _get_config_dir()
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 PATVS_ROOT = get_patvs_root()
 DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="
@@ -42,8 +55,8 @@ class OTASettings:
 class CryptoSettings:
     """时间加密 key，与后端对应"""
 
-    # result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key") #测试环境加密
-    result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key")  #开发环境加密
+    result_time_secret: str = os.getenv("SECRET_KEY", "pro-secret-key") # 生产环境加密
+    #result_time_secret: str = os.getenv("SECRET_KEY", "dev-secret-key") # 开发环境加密
 
 @dataclass(slots=True)
 class ClientSettings:
