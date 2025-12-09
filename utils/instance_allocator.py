@@ -24,11 +24,25 @@ class InstanceAllocation:
     meta_path: Path
 
 
+def ensure_instance_paths(base_root: Path | None = None) -> InstanceAllocation:
+    """
+    确保当前进程使用已分配的实例目录。
+
+    若环境变量已存在且可用，则直接返回；否则分配新的实例目录。
+    """
+
+    existing = _allocation_from_env()
+    if existing:
+        _register_cleanup(existing)
+        return existing
+    return allocate_instance_paths(base_root=base_root)
+
+
 def allocate_instance_paths(base_root: Path | None = None) -> InstanceAllocation:
     """
     为当前进程分配实例目录，并设置环境变量。
 
-    base_root 为空时，使用默认 PATVS 根目录（Windows 为 C:/PATVS，其他平台为 ~/PATVS）。
+    base_root 为空时，使用默认 PATVS 根目录 C:/PATVS。
     """
 
     resolved_base = base_root or _default_base_root()
@@ -55,12 +69,51 @@ def allocate_instance_paths(base_root: Path | None = None) -> InstanceAllocation
     )
     os.environ["PATVS_ROOT"] = str(allocation.patvs_root)
     os.environ["TTS_CONFIG_DIR"] = str(allocation.config_root)
+    os.environ["TTS_INSTANCE_SLOT"] = str(allocation.slot)
     _register_cleanup(allocation)
     return allocation
 
 
 def _default_base_root() -> Path:
-    return Path("C:/PATVS") if os.name == "nt" else Path.home() / "PATVS"
+    return Path("C:/PATVS")
+
+
+def _allocation_from_env() -> InstanceAllocation | None:
+    patvs_env = os.environ.get("PATVS_ROOT")
+    config_env = os.environ.get("TTS_CONFIG_DIR")
+    slot_env = os.environ.get("TTS_INSTANCE_SLOT")
+
+    if not patvs_env or not config_env:
+        return None
+
+    patvs_root = Path(patvs_env)
+    config_root = Path(config_env)
+
+    slot_root = patvs_root.parent if patvs_root.parent.name.startswith("slot-") else None
+    if slot_root is None and config_root.parent.name.startswith("slot-"):
+        slot_root = config_root.parent
+    if slot_root is None:
+        return None
+
+    try:
+        slot = int(slot_env) if slot_env is not None else int(slot_root.name.split("-", 1)[1])
+    except ValueError:
+        slot = 0
+
+    meta_path = slot_root / "meta.json"
+    for path in (slot_root, patvs_root, config_root):
+        path.mkdir(parents=True, exist_ok=True)
+
+    if slot_env is None:
+        os.environ["TTS_INSTANCE_SLOT"] = str(slot)
+
+    return InstanceAllocation(
+        slot=slot,
+        slot_root=slot_root,
+        patvs_root=patvs_root,
+        config_root=config_root,
+        meta_path=meta_path,
+    )
 
 
 @contextmanager
@@ -158,4 +211,3 @@ def _safe_remove(path: Path) -> None:
             path.unlink()
         except FileNotFoundError:
             pass
-

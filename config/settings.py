@@ -6,10 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .paths import get_patvs_root
+from utils.instance_allocator import ensure_instance_paths
 
 
 APP_NAME = "Test Tracking System"
 APP_VERSION = "2.0.2"
+
+# 确保在加载配置前完成实例目录分配，避免多实例共享同一根目录
+ensure_instance_paths()
 
 
 def _get_config_dir() -> Path:
