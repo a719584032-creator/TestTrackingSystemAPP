@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import sys
 
-from ui.application import main as launch
+from utils.instance_allocator import allocate_instance_paths
 
 
 def main() -> int:
     """启动 UI 程序"""
+
+    allocate_instance_paths()
+
+    from ui.application import main as launch  # 延后导入，确保实例目录先设置
 
     return launch()
 
