@@ -1,22 +1,23 @@
-"""Common exception classes used throughout the application."""
+"""应用中通用的异常类定义。"""
 from __future__ import annotations
 
 
 class ClientError(Exception):
-    """Base error for recoverable client issues."""
+    """可恢复的客户端错误的基础异常类型。"""
 
 
 class AuthenticationError(ClientError):
-    """Raised when the remote service rejects user credentials."""
+    """当远程服务拒绝用户凭据时抛出的异常。"""
 
 
 class ValidationError(ClientError):
-    """Raised when the UI layer detects invalid user input."""
+    """当 UI 层检测到无效用户输入时抛出的异常。"""
 
 
 class NetworkError(ClientError):
-    """Raised when an HTTP request cannot be completed."""
+    """当 HTTP 请求无法完成时抛出的异常。"""
 
 
 class UpdateError(ClientError):
-    """Raised when the OTA update workflow fails."""
+    """当 OTA 更新流程失败时抛出的异常。"""
+
