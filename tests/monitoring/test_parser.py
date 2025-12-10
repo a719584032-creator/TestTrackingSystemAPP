@@ -37,6 +37,7 @@ spec.loader.exec_module(parser)
 MonitoringAction = parser.MonitoringAction
 parse_keywords = parser.parse_keywords
 recording_requirement_minutes = parser.recording_requirement_minutes
+mikelog_requirement = parser.mikelog_requirement
 
 
 class ParseKeywordsTests(unittest.TestCase):
@@ -98,6 +99,16 @@ class ParseKeywordsTests(unittest.TestCase):
         self.assertEqual(action.amount, 2.0)
         self.assertEqual(action.normalized_name, "录音")
         self.assertEqual(recording_requirement_minutes(actions), 2.0)
+
+    def test_mikelog_keyword_supported(self):
+        actions = parse_keywords(["MikeLog+200"])
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.name, "MikeLog")
+        self.assertEqual(action.normalized_name, "mikelog")
+        self.assertEqual(action.amount, 200.0)
+        self.assertEqual(mikelog_requirement(actions), 200.0)
 
 
 if __name__ == "__main__":  # pragma: no cover - 仅用于本地调试执行
