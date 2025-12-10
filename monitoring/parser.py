@@ -209,10 +209,11 @@ def require_attachment(actions: Iterable[MonitoringAction]) -> bool:
     return False
 
 
-def recording_requirement_minutes(actions: Iterable[MonitoringAction]) -> float | None:
-    """Return required recording length (minutes) if a 录音 action is present."""
+def recording_requirement_minutes(actions: Iterable["MonitoringAction"]) -> float | None:
+    """如果存在“录音”类型的监控动作，则返回所需录音时长（分钟）；否则返回 None。"""
 
     for action in actions:
         if action.normalized_name == _normalize("录音"):
             return max(0.0, float(action.amount))
+
     return None
