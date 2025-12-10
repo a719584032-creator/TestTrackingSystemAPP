@@ -217,3 +217,12 @@ def recording_requirement_minutes(actions: Iterable["MonitoringAction"]) -> floa
             return max(0.0, float(action.amount))
 
     return None
+
+
+def mikelog_requirement(actions: Iterable["MonitoringAction"]) -> float | None:
+    """若存在 MikeLog 关键字，返回所需的 Resume counter (Total) 阈值。"""
+
+    for action in actions:
+        if action.normalized_name == _normalize("MikeLog"):
+            return max(0.0, float(action.amount))
+    return None
