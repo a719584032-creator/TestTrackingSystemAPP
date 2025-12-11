@@ -190,12 +190,15 @@ class ResultDialog(QtWidgets.QDialog):
         """ 添加附件 """
         max_size_bytes = 50 * 1024 * 1024
         current_total = 0
+        existing_paths = set()
         for payload in self._attachments:
             path = payload.get("local_path")
             if not path:
                 continue
             try:
-                current_total += Path(path).stat().st_size
+                resolved = str(Path(path).resolve())
+                existing_paths.add(resolved)
+                current_total += Path(resolved).stat().st_size
             except OSError:
                 continue
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -204,7 +207,12 @@ class ResultDialog(QtWidgets.QDialog):
             os.path.expanduser("~"),
             "All Files (*)",
         )
+        duplicates: List[str] = []
         for path in files:
+            resolved_path = str(Path(path).resolve())
+            if resolved_path in existing_paths:
+                duplicates.append(os.path.basename(path))
+                continue
             try:
                 file_size = Path(path).stat().st_size
             except OSError as exc:
@@ -221,10 +229,17 @@ class ResultDialog(QtWidgets.QDialog):
             except OSError as exc:  # pragma: no cover - 文件 IO 在测试环境难以稳定复现
                 QtWidgets.QMessageBox.warning(self, "读取失败", str(exc))
                 continue
-            payload["local_path"] = path
+            payload["local_path"] = resolved_path
             self._attachments.append(payload)
             self._attachment_list.addItem(os.path.basename(path))
             current_total += file_size
+            existing_paths.add(resolved_path)
+        if duplicates:
+            QtWidgets.QMessageBox.information(
+                self,
+                "重复附件",
+                "已跳过重复文件：\n" + "\n".join(duplicates),
+            )
 
     def _remove_attachment(self) -> None:
         """ 删除附件 """
