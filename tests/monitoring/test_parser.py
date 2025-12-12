@@ -38,6 +38,7 @@ MonitoringAction = parser.MonitoringAction
 parse_keywords = parser.parse_keywords
 recording_requirement_minutes = parser.recording_requirement_minutes
 mikelog_requirement = parser.mikelog_requirement
+transitioncaplog_requirement = parser.transitioncaplog_requirement
 
 
 class ParseKeywordsTests(unittest.TestCase):
@@ -109,6 +110,16 @@ class ParseKeywordsTests(unittest.TestCase):
         self.assertEqual(action.normalized_name, "mikelog")
         self.assertEqual(action.amount, 200.0)
         self.assertEqual(mikelog_requirement(actions), 200.0)
+
+    def test_transitioncaplog_keyword_supported(self):
+        actions = parse_keywords(["transitioncaplog+400"])
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.name, "TransitionCapLog")
+        self.assertEqual(action.normalized_name, "transitioncaplog")
+        self.assertEqual(action.amount, 400.0)
+        self.assertEqual(transitioncaplog_requirement(actions), 400.0)
 
 
 if __name__ == "__main__":  # pragma: no cover - 仅用于本地调试执行

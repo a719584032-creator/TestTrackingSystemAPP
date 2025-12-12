@@ -226,3 +226,12 @@ def mikelog_requirement(actions: Iterable["MonitoringAction"]) -> float | None:
         if action.normalized_name == _normalize("MikeLog"):
             return max(0.0, float(action.amount))
     return None
+
+
+def transitioncaplog_requirement(actions: Iterable["MonitoringAction"]) -> float | None:
+    """若存在 TransitionCapLog 关键字，返回所需的 loop count 阈值。"""
+
+    for action in actions:
+        if action.normalized_name == _normalize("TransitionCapLog"):
+            return max(0.0, float(action.amount))
+    return None

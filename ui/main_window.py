@@ -29,8 +29,10 @@ from monitoring.parser import (
     parse_keywords,
     recording_requirement_minutes,
     require_attachment,
+    transitioncaplog_requirement,
 )
 from monitoring.actions.mikelog_validator import read_resume_counter_after_end_test
+from monitoring.actions.transitioncaplog_validator import read_loop_count_after_end
 from monitoring.actions.luyin import get_audio_duration_seconds
 from services.api_client import ApiClient, encode_attachment
 from services.ota import UpdateInfo
@@ -110,11 +112,13 @@ class ResultDialog(QtWidgets.QDialog):
         require_attachment: bool,    # 是否必须上传附件
         recording_requirement: Optional[float] = None,  # 录音时长要求（分钟）
         mikelog_requirement: Optional[float] = None,  # MikeLog Resume counter 要求
+        transitioncap_requirement: Optional[float] = None,  # TransitionCapLog loop count 要求
     ) -> None:
         super().__init__(parent)
         self._require_attachment = require_attachment
         self._recording_requirement = recording_requirement
         self._mikelog_requirement = mikelog_requirement
+        self._transitioncap_requirement = transitioncap_requirement
         self._attachments: List[Dict[str, str]] = []
 
         self.setWindowTitle(f"提交结果 - {result_label}")
@@ -166,6 +170,10 @@ class ResultDialog(QtWidgets.QDialog):
         if self._mikelog_requirement:
             hint_messages.append(
                 f"提交通过需上传 Mike 日志（Resume counter ≥ {self._mikelog_requirement:g}）。"
+            )
+        if self._transitioncap_requirement:
+            hint_messages.append(
+                f"提交通过需上传 TransitionCap 日志（loop count ≥ {self._transitioncap_requirement:g}）。"
             )
         if hint_messages:
             hint = QtWidgets.QLabel("\n".join(hint_messages))
@@ -322,6 +330,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
         self._recording_requirement_minutes: Optional[float] = None
         self._mikelog_requirement: Optional[float] = None
+        self._transitioncap_requirement: Optional[float] = None
         self._refresh_in_progress = False
         self._device_filter_required = False
         self._refresh_spinner_timer = QtCore.QTimer(self)
@@ -1915,6 +1924,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_plan_device_model_id = entry.plan_device_model_id if entry else None
         self._recording_requirement_minutes = None
         self._mikelog_requirement = None
+        self._transitioncap_requirement = None
         if not self._execution_locked:
             self._set_action_buttons_mode(False)
         if not case:
@@ -1977,6 +1987,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._current_actions = actions
             self._recording_requirement_minutes = recording_requirement_minutes(actions)
             self._mikelog_requirement = mikelog_requirement(actions)
+            self._transitioncap_requirement = transitioncaplog_requirement(actions)
             for action in actions:
                 self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
         self._refresh_start_button_state()
@@ -1991,6 +2002,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._mikelog_requirement:
             attachment_hints.append(
                 f"提交通过需上传 Mike 日志（Resume counter ≥ {self._mikelog_requirement:g}）"
+            )
+        if self._transitioncap_requirement:
+            attachment_hints.append(
+                f"提交通过需上传 TransitionCap 日志（loop count ≥ {self._transitioncap_requirement:g}）"
             )
         self._attachment_hint.setText("\n".join(attachment_hints))
 
@@ -2007,7 +2022,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         for action in self._current_actions:
             normalized = action.normalized_name
-            if self._is_mikelog_action(action):
+            if self._is_mikelog_action(action) or self._is_transitioncap_action(action):
                 continue
             if 'log' in normalized:
                 return [True, normalized]
@@ -2018,6 +2033,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _is_mikelog_action(self, action: MonitoringAction) -> bool:
         return action.normalized_name == "mikelog"
+
+    def _is_transitioncap_action(self, action: MonitoringAction) -> bool:
+        return action.normalized_name == "transitioncaplog"
 
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
@@ -2045,7 +2063,9 @@ class MainWindow(QtWidgets.QMainWindow):
             monitoring_actions = [
                 action
                 for action in self._current_actions
-                if not self._is_recording_action(action) and not self._is_mikelog_action(action)
+                if not self._is_recording_action(action)
+                and not self._is_mikelog_action(action)
+                and not self._is_transitioncap_action(action)
             ]
             self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
             start_time = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2191,6 +2211,46 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return True
 
+    def _validate_transitioncaplog_attachments(
+        self,
+        attachments: Sequence[Dict[str, str]],
+        required_count: float,
+    ) -> bool:
+        """校验上传的 TransitionCap 日志是否满足 loop count 要求。"""
+
+        if required_count <= 0:
+            return True
+        log_paths: List[str] = []
+        for payload in attachments:
+            path = payload.get("local_path")
+            if path:
+                log_paths.append(path)
+        if not log_paths:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "缺少 TransitionCap 日志",
+                f"提交通过需要上传 TransitionCap 日志，loop count 需达到 {required_count:g}。",
+            )
+            return False
+
+        errors: List[str] = []
+        for path in log_paths:
+            try:
+                loop_count = read_loop_count_after_end(path)
+            except ValueError as exc:
+                errors.append(f"{os.path.basename(path)}: {exc}")
+                continue
+            if loop_count < required_count:
+                errors.append(
+                    f"{os.path.basename(path)} loop count = {loop_count}, 低于要求的 {required_count:g}"
+                )
+
+        if errors:
+            message = "\n".join(errors)
+            QtWidgets.QMessageBox.warning(self, "TransitionCap 日志不符合要求", message)
+            return False
+        return True
+
     def _submit_result(self, result: str) -> None:
         """ 更新结果 """
         if not self._current_case:
@@ -2221,10 +2281,17 @@ class MainWindow(QtWidgets.QMainWindow):
             and mikelog_required_count is not None
             and mikelog_required_count > 0
         )
+        transitioncap_required_count = transitioncaplog_requirement(actions)
+        transitioncap_required_for_result = (
+            result == "pass"
+            and transitioncap_required_count is not None
+            and transitioncap_required_count > 0
+        )
         need_attachment = (
             (result in {"pass", "fail"} and require_attachment(actions))
             or recording_required_for_result
             or mikelog_required_for_result
+            or transitioncap_required_for_result
         )
         device_model_id, plan_device_model_id, device_hint = self._resolve_submission_device(
             self._current_entry
@@ -2237,6 +2304,9 @@ class MainWindow(QtWidgets.QMainWindow):
             need_attachment,
             recording_requirement=recording_minutes if recording_required_for_result else None,
             mikelog_requirement=float(mikelog_required_count) if mikelog_required_for_result else None,
+            transitioncap_requirement=float(transitioncap_required_count)
+            if transitioncap_required_for_result
+            else None,
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -2256,6 +2326,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if mikelog_required_for_result:
             if not self._validate_mikelog_attachments(
                 attachments_with_local, float(mikelog_required_count)
+            ):
+                return
+        if transitioncap_required_for_result:
+            if not self._validate_transitioncaplog_attachments(
+                attachments_with_local, float(transitioncap_required_count)
             ):
                 return
         attachments = [
