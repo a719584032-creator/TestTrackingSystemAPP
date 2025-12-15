@@ -53,16 +53,47 @@ class VolumeEndpointService:
     def _resolve_activate(devices):
         """兼容不同 pycaw 版本，返回可用的 Activate 调用。"""
 
-        activate = getattr(devices, "Activate", None)
-        if callable(activate):
-            return activate
-
-        for attr in ("_device", "_ctl", "device"):
+        candidates = [devices]
+        for attr in ("_device", "device", "_ctl", "interface", "_AudioDevice__device", "_AudioDevice__ctl"):
             raw = getattr(devices, attr, None)
-            activate = getattr(raw, "Activate", None)
+            if raw is not None:
+                candidates.append(raw)
+        try:
+            candidates.extend(devices.__dict__.values())
+        except Exception:
+            pass
+
+        for obj in candidates:
+            activate = getattr(obj, "Activate", None)
             if callable(activate):
                 return activate
         return None
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _waveout_volume():
+        """使用 winmm 作为兜底方案，避免 pycaw 版本差异导致失败。"""
+
+        try:
+            from ctypes import byref, c_uint, windll
+        except Exception:
+            return None
+
+        class _WaveOutEndpoint:
+            def GetMasterVolumeLevelScalar(self) -> float:
+                value = c_uint()
+                result = windll.winmm.waveOutGetVolume(0, byref(value))
+                if result != 0:
+                    raise OSError(f"waveOutGetVolume failed with code {result}")
+                raw = value.value
+                left = raw & 0xFFFF
+                right = (raw >> 16) & 0xFFFF
+                return float(left + right) / float(0xFFFF * 2)
+
+            def Release(self) -> None:
+                return None
+
+        return _WaveOutEndpoint()
 
     # ------------------------------------------------------------------
     def _run(self) -> None:
@@ -76,9 +107,14 @@ class VolumeEndpointService:
             devices = AudioUtilities.GetSpeakers()
             activate = self._resolve_activate(devices)
             if activate is None:
-                raise AttributeError("AudioDevice does not expose Activate; check pycaw version")
-            interface = activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))  # 获取音量接口指针
+                volume = self._waveout_volume()
+                if volume is None:
+                    raise AttributeError(
+                        f"AudioDevice has no Activate; available attrs: {sorted(set(dir(devices)))}"
+                    )
+            else:
+                interface = activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume = cast(interface, POINTER(IAudioEndpointVolume))  # 获取音量接口指针
         except Exception as exc:  # pragma: no cover - hardware/COM init failures
             self._startup_error = exc
             self._ready.set()
