@@ -49,6 +49,22 @@ class VolumeEndpointService:
             return cls._instance
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _resolve_activate(devices):
+        """兼容不同 pycaw 版本，返回可用的 Activate 调用。"""
+
+        activate = getattr(devices, "Activate", None)
+        if callable(activate):
+            return activate
+
+        for attr in ("_device", "_ctl", "device"):
+            raw = getattr(devices, attr, None)
+            activate = getattr(raw, "Activate", None)
+            if callable(activate):
+                return activate
+        return None
+
+    # ------------------------------------------------------------------
     def _run(self) -> None:
         coinited = False
         self._startup_error: Exception | None = None
@@ -58,7 +74,10 @@ class VolumeEndpointService:
                 pythoncom.CoInitialize()  # 每个线程单独初始化 COM
                 coinited = True
             devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            activate = self._resolve_activate(devices)
+            if activate is None:
+                raise AttributeError("AudioDevice does not expose Activate; check pycaw version")
+            interface = activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             volume = cast(interface, POINTER(IAudioEndpointVolume))  # 获取音量接口指针
         except Exception as exc:  # pragma: no cover - hardware/COM init failures
             self._startup_error = exc
