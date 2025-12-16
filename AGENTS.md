@@ -14,9 +14,6 @@ Run the client locally with `python run.py`. Package a distributable with `pytho
 ## Coding Style & Naming Conventions
 Code should follow PEP 8 with 4-space indentation, type hints, and concise docstrings. Modules, packages, and functions use `snake_case`, while classes retain `CapWords`. Prefer explicit imports (`from services.api_client import ApiClient`) and mirror the module-level `logger = logging.getLogger(__name__)` pattern found in `services/api_client.py`. Run `python -m compileall .` or your editor’s formatter before submitting; Black-compatible formatting is encouraged but not enforced.
 
-## Testing Guidelines
-There is no committed automated suite yet. Add `pytest` tests under a `tests/` directory mirroring the source layout (`tests/services/test_api_client.py`, etc.). Name files `test_<module>.py`, keep fixtures focused on API boundaries, and mock HTTP calls with `requests-mock` instead of live services. Always perform a smoke run of `python run.py` to ensure the UI still boots, and capture screenshots when you touch visible widgets.
-
 ## Commit & Pull Request Guidelines
 Commit messages use sentence-case imperatives (`Ensure monitoring message loops stop on manual abort`), so keep them short and actionable. Squash noisy intermediates before opening a PR. PRs should describe the problem, the solution approach, and UI impacts; attach logs or screenshots for visual changes and link to tracking issues. Confirm local packaging (`python build.py`) for release-facing updates and note any manual steps reviewers must execute.
 
