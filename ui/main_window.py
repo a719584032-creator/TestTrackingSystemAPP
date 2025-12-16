@@ -25,12 +25,14 @@ from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
 from monitoring.parser import (
     MonitoringAction,
+    crystaldiskmark_requirement,
     mikelog_requirement,
     parse_keywords,
     recording_requirement_minutes,
     require_attachment,
     transitioncaplog_requirement,
 )
+from monitoring.actions.crystaldiskmark_validator import read_peak_speeds
 from monitoring.actions.mikelog_validator import read_resume_counter_after_end_test
 from monitoring.actions.transitioncaplog_validator import read_loop_count_after_end
 from monitoring.actions.luyin import get_audio_duration_seconds
@@ -112,12 +114,14 @@ class ResultDialog(QtWidgets.QDialog):
         require_attachment: bool,    # 是否必须上传附件
         recording_requirement: Optional[float] = None,  # 录音时长要求（分钟）
         mikelog_requirement: Optional[float] = None,  # MikeLog Resume counter 要求
+        crystaldiskmark_requirement: Optional[float] = None,  # CrystalDiskMark 读写速率要求
         transitioncap_requirement: Optional[float] = None,  # TransitionCapLog loop count 要求
     ) -> None:
         super().__init__(parent)
         self._require_attachment = require_attachment
         self._recording_requirement = recording_requirement
         self._mikelog_requirement = mikelog_requirement
+        self._crystaldiskmark_requirement = crystaldiskmark_requirement
         self._transitioncap_requirement = transitioncap_requirement
         self._attachments: List[Dict[str, str]] = []
 
@@ -170,6 +174,11 @@ class ResultDialog(QtWidgets.QDialog):
         if self._mikelog_requirement:
             hint_messages.append(
                 f"提交通过需上传 Mike 日志（Resume counter ≥ {self._mikelog_requirement:g}）。"
+            )
+        if self._crystaldiskmark_requirement:
+            hint_messages.append(
+                "提交通过需上传 CrystalDiskMark 日志"
+                f"（读写速率 ≥ {self._crystaldiskmark_requirement:g} MB/s）。"
             )
         if self._transitioncap_requirement:
             hint_messages.append(
@@ -330,6 +339,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
         self._recording_requirement_minutes: Optional[float] = None
         self._mikelog_requirement: Optional[float] = None
+        self._crystaldiskmark_requirement: Optional[float] = None
         self._transitioncap_requirement: Optional[float] = None
         self._refresh_in_progress = False
         self._device_filter_required = False
@@ -1924,6 +1934,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_plan_device_model_id = entry.plan_device_model_id if entry else None
         self._recording_requirement_minutes = None
         self._mikelog_requirement = None
+        self._crystaldiskmark_requirement = None
         self._transitioncap_requirement = None
         if not self._execution_locked:
             self._set_action_buttons_mode(False)
@@ -1987,6 +1998,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._current_actions = actions
             self._recording_requirement_minutes = recording_requirement_minutes(actions)
             self._mikelog_requirement = mikelog_requirement(actions)
+            self._crystaldiskmark_requirement = crystaldiskmark_requirement(actions)
             self._transitioncap_requirement = transitioncaplog_requirement(actions)
             for action in actions:
                 self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
@@ -2002,6 +2014,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._mikelog_requirement:
             attachment_hints.append(
                 f"提交通过需上传 Mike 日志（Resume counter ≥ {self._mikelog_requirement:g}）"
+            )
+        if self._crystaldiskmark_requirement:
+            attachment_hints.append(
+                f"提交通过需上传 CrystalDiskMark 日志（读写速率 ≥ {self._crystaldiskmark_requirement:g} MB/s）"
             )
         if self._transitioncap_requirement:
             attachment_hints.append(
@@ -2034,6 +2050,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _is_mikelog_action(self, action: MonitoringAction) -> bool:
         return action.normalized_name == "mikelog"
 
+    def _is_crystaldiskmark_action(self, action: MonitoringAction) -> bool:
+        return action.normalized_name == "crystaldiskmark"
+
     def _is_transitioncap_action(self, action: MonitoringAction) -> bool:
         return action.normalized_name == "transitioncaplog"
 
@@ -2065,6 +2084,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 for action in self._current_actions
                 if not self._is_recording_action(action)
                 and not self._is_mikelog_action(action)
+                and not self._is_crystaldiskmark_action(action)
                 and not self._is_transitioncap_action(action)
             ]
             self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
@@ -2211,6 +2231,48 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return True
 
+    def _validate_crystaldiskmark_attachments(
+        self,
+        attachments: Sequence[Dict[str, str]],
+        required_speed: float,
+    ) -> bool:
+        """校验上传的 CrystalDiskMark 日志是否满足读写速率要求。"""
+
+        if required_speed <= 0:
+            return True
+        log_paths: List[str] = []
+        for payload in attachments:
+            path = payload.get("local_path")
+            if path:
+                log_paths.append(path)
+        if not log_paths:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "缺少 CrystalDiskMark 日志",
+                f"提交通过需要上传 CrystalDiskMark 日志，读写速率需达到 {required_speed:g} MB/s。",
+            )
+            return False
+
+        errors: List[str] = []
+        for path in log_paths:
+            try:
+                read_speed, write_speed = read_peak_speeds(path)
+            except ValueError as exc:
+                errors.append(f"{os.path.basename(path)}: {exc}")
+                continue
+            # 需分别在 [Read] 与 [Write] 段找到大于阈值的速率
+            if read_speed <= required_speed or write_speed <= required_speed:
+                errors.append(
+                    f"{os.path.basename(path)} 读 {read_speed:.3f} MB/s，写 {write_speed:.3f} MB/s，"
+                    f"未超过要求的 {required_speed:g} MB/s"
+                )
+
+        if errors:
+            message = "\n".join(errors)
+            QtWidgets.QMessageBox.warning(self, "CrystalDiskMark 日志不符合要求", message)
+            return False
+        return True
+
     def _validate_transitioncaplog_attachments(
         self,
         attachments: Sequence[Dict[str, str]],
@@ -2281,6 +2343,12 @@ class MainWindow(QtWidgets.QMainWindow):
             and mikelog_required_count is not None
             and mikelog_required_count > 0
         )
+        crystaldiskmark_required_speed = crystaldiskmark_requirement(actions)
+        crystaldiskmark_required_for_result = (
+            result == "pass"
+            and crystaldiskmark_required_speed is not None
+            and crystaldiskmark_required_speed > 0
+        )
         transitioncap_required_count = transitioncaplog_requirement(actions)
         transitioncap_required_for_result = (
             result == "pass"
@@ -2291,6 +2359,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (result in {"pass", "fail"} and require_attachment(actions))
             or recording_required_for_result
             or mikelog_required_for_result
+            or crystaldiskmark_required_for_result
             or transitioncap_required_for_result
         )
         device_model_id, plan_device_model_id, device_hint = self._resolve_submission_device(
@@ -2304,6 +2373,9 @@ class MainWindow(QtWidgets.QMainWindow):
             need_attachment,
             recording_requirement=recording_minutes if recording_required_for_result else None,
             mikelog_requirement=float(mikelog_required_count) if mikelog_required_for_result else None,
+            crystaldiskmark_requirement=float(crystaldiskmark_required_speed)
+            if crystaldiskmark_required_for_result
+            else None,
             transitioncap_requirement=float(transitioncap_required_count)
             if transitioncap_required_for_result
             else None,
@@ -2326,6 +2398,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if mikelog_required_for_result:
             if not self._validate_mikelog_attachments(
                 attachments_with_local, float(mikelog_required_count)
+            ):
+                return
+        if crystaldiskmark_required_for_result:
+            if not self._validate_crystaldiskmark_attachments(
+                attachments_with_local, float(crystaldiskmark_required_speed)
             ):
                 return
         if transitioncap_required_for_result:

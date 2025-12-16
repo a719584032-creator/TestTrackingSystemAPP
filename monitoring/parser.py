@@ -85,10 +85,9 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("音量"),
     _ActionDefinition("摄像头"),
     _ActionDefinition("Camera"),
-
     _ActionDefinition("MikeLog"),
     _ActionDefinition("TransitionCapLog"),
-    _ActionDefinition("DriversLog"),
+    _ActionDefinition("CrystalDiskMark"),
 
 )
 
@@ -224,6 +223,15 @@ def mikelog_requirement(actions: Iterable["MonitoringAction"]) -> float | None:
 
     for action in actions:
         if action.normalized_name == _normalize("MikeLog"):
+            return max(0.0, float(action.amount))
+    return None
+
+
+def crystaldiskmark_requirement(actions: Iterable["MonitoringAction"]) -> float | None:
+    """若存在 CrystalDiskMark 关键字，返回所需的读写速率阈值（MB/s）。"""
+
+    for action in actions:
+        if action.normalized_name == _normalize("CrystalDiskMark"):
             return max(0.0, float(action.amount))
     return None
 
