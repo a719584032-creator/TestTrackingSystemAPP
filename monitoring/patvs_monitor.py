@@ -23,6 +23,7 @@ from .qt_compat import wx
 from .actions import (
     audio_event_monitor,
     camera_monitor,
+    hotplug_monitor,
     hdmi_monitor,
     display_monitor,
     keyboard_any_monitor,
@@ -763,6 +764,16 @@ class Patvs_Fuction:
                             args=(self, target_value),
                             kwargs={"remaining_cycles": remaining_value_float},
                         ).start()
+
+                    elif normalized_action == "hotplug":
+                        self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
+                        thread = threading.Thread(
+                            target=hotplug_monitor.run,
+                            args=(self, target_value),
+                            kwargs={"remaining_cycles": remaining_value_float},
+                        )
+                        thread.start()
+                        self.register_message_loop_thread(thread.ident)
 
                     elif normalized_action.lower() == "usb插拔":
                         self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
