@@ -75,12 +75,13 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("Restart"),
     _ActionDefinition("电源插拔"),
     _ActionDefinition("USB 插拔"),
+    _ActionDefinition("Hotplug"),
     _ActionDefinition("键盘按键"),
     _ActionDefinition("锁屏"),
     _ActionDefinition("鼠标点击"),
     _ActionDefinition("S3 插拔", components=("S3 睡眠", "USB 插拔")),
     _ActionDefinition("S3 电源插拔", components=("S3 睡眠", "电源插拔")),
-    _ActionDefinition("显示器"),
+    _ActionDefinition("显示器开关"),
     _ActionDefinition("显示器插拔"),
     _ActionDefinition("音量"),
     _ActionDefinition("摄像头"),
@@ -88,7 +89,9 @@ _ACTION_DEFINITIONS: Tuple[_ActionDefinition, ...] = (
     _ActionDefinition("MikeLog"),
     _ActionDefinition("TransitionCapLog"),
     _ActionDefinition("CrystalDiskMark"),
-
+    # 表单记录显示器组合测试类型并检测分辨率
+    # usb-a 口
+    # 九宫格
 )
 
 # 常规动作映射：规范化名称 -> 动作定义
@@ -106,6 +109,7 @@ ACTION_ALIASES = {
     _normalize("s3usb"): _normalize("S3 插拔"),
     _normalize("s3+电源插拔"): _normalize("S3 电源插拔"),
     _normalize("time"): _normalize("时间"),
+    _normalize("hotplug"): _normalize("Hotplug"),
     _normalize("hdmi"): _normalize("显示器插拔"),
     _normalize("hdmi插拔"): _normalize("显示器插拔"),
     _normalize("displayhotplug"): _normalize("显示器插拔"),
