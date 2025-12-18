@@ -9,14 +9,22 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
 
 
-def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
+def run(
+    context: "Patvs_Fuction",
+    start_time,
+    target_cycles,
+    action_label: str | None = None,
+) -> None:
     """统计并监控 S4 睡眠事件。"""
+    label = str(action_label).strip() if action_label else "S4"
+    if not label:
+        label = "S4"
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
         target_cycles = 0.0
     if target_cycles <= 0:
-        context.log("S4 目标次数为 0，自动跳过。")
+        context.log(f"{label} 目标次数为 0，自动跳过。")
         context.action_complete.set()
         return
 
@@ -33,9 +41,11 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
     context._record_count_progress(target_cycles, total, action_key="s4")
 
     if total:
-        context.log(f"S4 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
+        context.log(
+            f"{label} 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。"
+        )
     if total >= target_cycles:
-        context.log(f"已完成目标S4次数: {int(total)}")
+        context.log(f"已完成目标{label}次数: {int(total)}")
         context.action_complete.set()
         return
 
@@ -100,16 +110,16 @@ def run(context: "Patvs_Fuction", start_time, target_cycles) -> None:
 
             if total > log_num:
                 context.log(
-                    f"当前已测试 {total} 次，目标次数为 {target_cycles:g} 次。"
+                    f"当前已测试 {label} {total} 次，目标次数为 {target_cycles:g} 次。"
                 )
                 log_num = total
             if total >= target_cycles:
                 context._record_count_progress(target_cycles, total, action_key="s4")
-                context.log(f"已完成目标S4次数: {target_cycles:g}")
+                context.log(f"已完成目标{label}次数: {target_cycles:g}")
                 return
     finally:
         context._record_count_progress(target_cycles, total, action_key="s4")
-        context.log("停止S4事件监控.")
+        context.log(f"停止{label}事件监控.")
         if hand:
             try:
                 win32evtlog.CloseEventLog(hand)

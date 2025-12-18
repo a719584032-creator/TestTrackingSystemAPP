@@ -8,6 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Iterable, Optional, Tuple
 
 import pywintypes
+import win32api
 import win32con
 import win32gui
 import win32gui_struct
@@ -19,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 GUID_DEVINTERFACE_USB_DEVICE = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 GUID_DEVINTERFACE_DISK = "{53F56307-B6BF-11D0-94F2-00A0C91EFB8B}"
-GUID_DEVINTERFACE_HID = "{4D1E55B2-F16F-11CF-88CB-001111000030}"
+#GUID_DEVINTERFACE_HID = "{4D1E55B2-F16F-11CF-88CB-001111000030}"
 GUID_DEVINTERFACE_NET = "{CAC88484-7515-4C03-82E6-71A87ABAC361}"
 
 DEFAULT_CLASS_GUIDS: Tuple[str, ...] = (
     GUID_DEVINTERFACE_USB_DEVICE,
     GUID_DEVINTERFACE_DISK,
-    GUID_DEVINTERFACE_HID,
+    # GUID_DEVINTERFACE_HID,
     GUID_DEVINTERFACE_NET,
 )
 
@@ -84,6 +85,7 @@ class InterfaceNotification:
         )
 
     def init_notification_window(self):
+        # 通过隐藏窗口接收设备变更广播
         message_map = {win32con.WM_DEVICECHANGE: self.onDeviceChange}
         wc = win32gui.WNDCLASS()
         wc.hInstance = win32api.GetModuleHandle(None)
@@ -105,6 +107,7 @@ class InterfaceNotification:
             None,
         )
 
+        # 为各类设备接口注册通知，捕获插拔事件
         for guid in self.class_guids:
             try:
                 dbt_dev_broadcast_deviceinterface = (
@@ -140,6 +143,7 @@ class InterfaceNotification:
         device_key = device_name.lower()
         cache_key = (int(wparam), device_key)
         now = time.monotonic()
+        # 同一设备短时间重复事件（如到达+配置）需要去重
         if (
             self.dedupe_window
             and cache_key in self._event_cache
@@ -161,6 +165,7 @@ class InterfaceNotification:
         elif wparam == win32con.DBT_DEVICEARRIVAL and self.log_arrival:
             self.context.log(f"检测到 {self.action_label}接入: {device_name}")
 
+        # 达到目标次数，记录进度并退出消息循环
         if self.target_cycles and self.cycles_count >= self.target_cycles:
             self.context.record_count_progress_if_current(
                 self.target_cycles,
@@ -176,11 +181,13 @@ class InterfaceNotification:
 
     def messageLoop(self):
         try:
+            # 阻塞等待窗口消息，直到 PostQuitMessage
             win32gui.PumpMessages()
         finally:
             self._cleanup()
 
     def _cleanup(self):
+        # 释放已注册的通知和窗口句柄
         for handle in self.hdn or []:
             try:
                 win32gui.UnregisterDeviceNotification(handle)
@@ -209,6 +216,7 @@ def run(
     except (TypeError, ValueError):
         total_target = 0.0
     if total_target <= 0:
+        # 未配置目标次数时直接跳过监控
         context.log("设备接口热插拔目标次数为 0，自动跳过。")
         if hotplug_done_event:
             hotplug_done_event.set()
@@ -231,6 +239,7 @@ def run(
             f"设备接口热插拔已累计 {completed:g} 次，剩余 {max(0.0, total_target - completed):g} 次。"
         )
 
+    # 创建设备热插拔通知窗口并进入消息循环
     notification = InterfaceNotification(
         context,
         completed,

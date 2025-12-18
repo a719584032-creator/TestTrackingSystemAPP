@@ -189,9 +189,11 @@ class PlanDetail:
     device_models: List[DeviceModel] = field(default_factory=list)
     statistics: Optional[PlanStatistics] = None
     execution_runs: List[PlanExecutionRun] = field(default_factory=list)
+    dock_nine_gird: Dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanDetail":
+        dock_nine_gird = _normalize_nine_grid(payload.get("dock_nine_gird"))
         return cls(
             id=payload.get("id"),
             name=payload.get("name", ""),
@@ -209,6 +211,7 @@ class PlanDetail:
             execution_runs=[
                 PlanExecutionRun.from_dict(item) for item in payload.get("execution_runs", [])
             ],
+            dock_nine_gird=dock_nine_gird,
         )
 
     def tester_names(self) -> List[str]:
@@ -218,6 +221,23 @@ class PlanDetail:
             if name:
                 names.append(name)
         return names
+
+
+def _normalize_nine_grid(raw: Any) -> Dict[str, float]:
+    """Normalize nine-grid config values."""
+
+    if not isinstance(raw, dict):
+        return {}
+    normalized: Dict[str, float] = {}
+    for key, value in raw.items():
+        if key is None:
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        normalized[str(key)] = numeric
+    return normalized
 
 
 @dataclass(slots=True)
