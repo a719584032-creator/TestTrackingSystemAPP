@@ -43,6 +43,7 @@ from .actions import (
 
 from config.settings import SETTINGS
 from .session_store import SessionStateStore
+from .nine_grid import NINE_GRID_LABEL_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -632,7 +633,8 @@ class Patvs_Fuction:
 
     def normalize_action(self, action):
         """ 规范化动作格式 """
-        return action.lower().replace(" ", "")
+        normalized = str(action).lower().replace(" ", "")
+        return NINE_GRID_LABEL_ALIASES.get(normalized, normalized)
 
     def run_main(self, case_id, action_and_num, start_time):
         """ 根据用例关键字统一调用监控， action_and_num示例: [("S3", 5), ("USB插拔", 10), ("时间", 30)] """
@@ -812,12 +814,14 @@ class Patvs_Fuction:
                         threading.Thread(
                             target=s3_sleep_monitor.run,
                             args=(self, self.case_start_time, target_value),
+                            kwargs={"action_label": action},
                         ).start()
                     elif normalized_action == "s4":
                         self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
                         threading.Thread(
                             target=s4_sleep_monitor.run,
                             args=(self, self.case_start_time, target_value),
+                            kwargs={"action_label": action},
                         ).start()
 
                     elif normalized_action == "s5":
@@ -825,6 +829,7 @@ class Patvs_Fuction:
                         threading.Thread(
                             target=s5_sleep_monitor.run,
                             args=(self, self.case_start_time, target_value),
+                            kwargs={"action_label": action},
                         ).start()
                     elif normalized_action == "restart":
                         self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")

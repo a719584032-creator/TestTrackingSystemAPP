@@ -23,6 +23,11 @@ from models import (
 )
 from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
 from monitoring.manager import MonitoringManager
+from monitoring.nine_grid import (
+    NineGridAction,
+    build_nine_grid_actions,
+    build_nine_grid_actions_from_session,
+)
 from monitoring.parser import (
     MonitoringAction,
     crystaldiskmark_requirement,
@@ -32,6 +37,7 @@ from monitoring.parser import (
     require_attachment,
     transitioncaplog_requirement,
 )
+from monitoring.session_store import SessionStateStore
 from monitoring.actions.crystaldiskmark_validator import read_peak_speeds
 from monitoring.actions.mikelog_validator import read_resume_counter_after_end_test
 from monitoring.actions.transitioncaplog_validator import read_loop_count_after_end
@@ -39,6 +45,7 @@ from monitoring.actions.luyin import get_audio_duration_seconds
 from services.api_client import ApiClient, encode_attachment
 from services.ota import UpdateInfo
 from services.update_manager import UpdateManager
+from ui.nine_grid_order_dialog import NineGridOrderDialog
 from ui.state import WindowStateStore
 from utils.exceptions import AuthenticationError, ClientError, NetworkError, UpdateError, ValidationError
 from config.settings import APP_VERSION, SETTINGS
@@ -341,6 +348,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mikelog_requirement: Optional[float] = None
         self._crystaldiskmark_requirement: Optional[float] = None
         self._transitioncap_requirement: Optional[float] = None
+        self._current_has_nine_grid = False
+        self._nine_grid_actions: List[NineGridAction] = []
         self._refresh_in_progress = False
         self._device_filter_required = False
         self._refresh_spinner_timer = QtCore.QTimer(self)
@@ -1000,6 +1009,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _normalize_token(value: str) -> str:
+        return value.strip().lower().replace(" ", "")
+
+    def _monitoring_case_id(self, case: Optional[PlanCase]) -> Optional[int]:
+        if not case:
+            return None
+        return self._int_or_none(getattr(case, "case_id", None))
 
     def _load_state_payload(self) -> Dict[str, object]:
         """ 读取保存的请求参数，用于窗口回放 """
@@ -1948,6 +1966,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._keyword_list.clear()
             self._keyword_error.setVisible(False)
             self._attachment_hint.clear()
+            self._current_has_nine_grid = False
+            self._nine_grid_actions = []
             self._refresh_start_button_state()
             return
 
@@ -1985,7 +2005,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._expected_view.setPlainText(expected or "暂无预期结果")
         self._expected_view.verticalScrollBar().setValue(0)
 
-        self._keyword_list.clear()
+        self._current_has_nine_grid = self._case_has_nine_grid_keyword(case)
+        self._nine_grid_actions = (
+            self._load_nine_grid_actions_for_case(case)
+            if self._current_has_nine_grid
+            else []
+        )
         try:
             # 解析用例关键字
             actions = parse_keywords(case.keyword_actions())
@@ -2000,8 +2025,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mikelog_requirement = mikelog_requirement(actions)
             self._crystaldiskmark_requirement = crystaldiskmark_requirement(actions)
             self._transitioncap_requirement = transitioncaplog_requirement(actions)
-            for action in actions:
-                self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
+        self._render_keyword_list()
         self._refresh_start_button_state()
         self._log_view.clear()
         attachment_hints: List[str] = []
@@ -2024,6 +2048,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"提交通过需上传 TransitionCap 日志（loop count ≥ {self._transitioncap_requirement:g}）"
             )
         self._attachment_hint.setText("\n".join(attachment_hints))
+
+    # ------------------------------------------------------------------
+    def _render_keyword_list(self) -> None:
+        self._keyword_list.clear()
+        for action in self._current_actions:
+            self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
+        if self._current_has_nine_grid:
+            if not self._nine_grid_actions:
+                self._keyword_list.addItem("九宫格 -> 未配置动作")
+            else:
+                for action in self._nine_grid_actions:
+                    self._keyword_list.addItem(
+                        f"{action.label} -> {action.count:g}"
+                    )
 
     # ------------------------------------------------------------------
     def _requires_audio_logs(self) -> bool:
@@ -2056,6 +2094,66 @@ class MainWindow(QtWidgets.QMainWindow):
     def _is_transitioncap_action(self, action: MonitoringAction) -> bool:
         return action.normalized_name == "transitioncaplog"
 
+    def _case_has_nine_grid_keyword(self, case: Optional[PlanCase]) -> bool:
+        if not case:
+            return False
+        for token in case.keyword_tokens():
+            if self._normalize_token(str(token)) == "九宫格":
+                return True
+        return False
+
+    def _load_nine_grid_actions(self) -> List[NineGridAction]:
+        detail = self._plan_detail
+        if not detail or not detail.dock_nine_gird:
+            plan_id = self._int_or_none(self._plan_combo.currentData())
+            if plan_id is None:
+                return []
+            try:
+                detail = self._api.get_plan_detail(plan_id)
+            except ClientError as exc:
+                self._logger.warning("刷新九宫格配置失败: %s", exc)
+                return []
+            self._plan_detail = detail
+        if not detail or not detail.dock_nine_gird:
+            return []
+        return build_nine_grid_actions(detail.dock_nine_gird)
+
+    def _load_nine_grid_actions_from_session(self, case_id: int) -> List[NineGridAction]:
+        store = SessionStateStore(
+            SETTINGS.monitoring_temp_file,
+            SETTINGS.monitoring_cache_file,
+            SETTINGS.monitoring_encryption_key,
+        )
+        payload, _ = store.load(case_id)
+        if not payload:
+            return []
+        actions = payload.get("actions")
+        if not isinstance(actions, list):
+            return []
+        return build_nine_grid_actions_from_session(actions)
+
+    def _load_nine_grid_actions_for_case(
+        self, case: Optional[PlanCase]
+    ) -> List[NineGridAction]:
+        case_id = self._monitoring_case_id(case)
+        if case_id is not None:
+            session_actions = self._load_nine_grid_actions_from_session(case_id)
+            if session_actions:
+                return session_actions
+        return self._load_nine_grid_actions()
+
+    def _has_pending_monitoring_session(self, case_id: int) -> bool:
+        store = SessionStateStore(
+            SETTINGS.monitoring_temp_file,
+            SETTINGS.monitoring_cache_file,
+            SETTINGS.monitoring_encryption_key,
+        )
+        payload, _ = store.load(case_id)
+        if not payload:
+            return False
+        actions = payload.get("actions")
+        return isinstance(actions, list) and bool(actions)
+
     # ------------------------------------------------------------------
     def _start_monitoring(self) -> None:
         """ 开始执行 """
@@ -2087,7 +2185,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 and not self._is_crystaldiskmark_action(action)
                 and not self._is_transitioncap_action(action)
             ]
-            self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
             start_time = dt.datetime.now(dt.timezone.utc).isoformat()
             if self._current_case and self._current_case.id:
                 self._case_execution_start_times[int(self._current_case.id)] = start_time
@@ -2107,6 +2204,35 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"该用例包含 {log_name} 监控，请先选择至少一个串口日志文件。",
                 )
                 return
+            if self._current_has_nine_grid:
+                case_id = self._monitoring_case_id(self._current_case)
+                if case_id is None:
+                    QtWidgets.QMessageBox.warning(self, "九宫格配置缺失", "未获取到用例信息。")
+                    return
+                nine_grid_actions = self._nine_grid_actions or self._load_nine_grid_actions()
+                if not nine_grid_actions:
+                    QtWidgets.QMessageBox.warning(self, "九宫格配置缺失", "该计划未配置九宫格动作。")
+                    return
+                self._nine_grid_actions = list(nine_grid_actions)
+                ordered_actions = list(self._nine_grid_actions)
+                if (
+                    not self._auto_start_in_progress
+                    and not self._has_pending_monitoring_session(case_id)
+                ):
+                    dialog = NineGridOrderDialog(ordered_actions, self)
+                    dialog.set_actions(ordered_actions)
+                    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+                        return
+                    ordered_actions = dialog.ordered_actions()
+                self._nine_grid_actions = list(ordered_actions)
+                self._render_keyword_list()
+                monitoring_actions = [
+                    MonitoringAction(name=item.label, amount=item.count)
+                    for item in ordered_actions
+                ]
+                if self._current_actions:
+                    self._append_log("检测到九宫格关键字，将按九宫格动作顺序执行。")
+            self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
             if monitoring_actions:
                 self._monitoring.start(
                     self._current_case.case_id,

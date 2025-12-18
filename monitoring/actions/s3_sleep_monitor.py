@@ -15,14 +15,18 @@ def run(
     start_time,
     target_cycles,
     s3_done_event: Optional[threading.Event] = None,
+    action_label: str | None = None,
 ) -> None:
     """统计并监控 S3 睡眠事件。"""
+    label = str(action_label).strip() if action_label else "S3"
+    if not label:
+        label = "S3"
     try:
         target_cycles = float(target_cycles)
     except (TypeError, ValueError):
         target_cycles = 0.0
     if target_cycles <= 0:
-        context.log("S3 目标次数为 0，自动跳过。")
+        context.log(f"{label} 目标次数为 0，自动跳过。")
         if s3_done_event:
             s3_done_event.set()
         else:
@@ -44,16 +48,18 @@ def run(
         nonlocal log_num
         if total != log_num:
             context.log(
-                f"当前已测试S3 {total} 次，目标次数为 {target_cycles:g} 次。"
+                f"当前已测试 {label} {total} 次，目标次数为 {target_cycles:g} 次。"
             )
             log_num = total
 
     # 记录初始进度
     context._record_count_progress(target_cycles, total, action_key="s3")
     if total:
-        context.log(f"S3 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。")
+        context.log(
+            f"{label} 已累计完成 {total} 次，剩余 {int(max(0, target_cycles - total))} 次。"
+        )
     if total >= target_cycles:
-        context.log(f"已完成目标S3次数: {int(total)}")
+        context.log(f"已完成目标{label}次数: {int(total)}")
         if s3_done_event:
             s3_done_event.set()
         else:
@@ -130,7 +136,7 @@ def run(
 
             if total >= target_cycles:
                 context._record_count_progress(target_cycles, total, action_key="s3")
-                context.log(f"已完成目标S3次数: {total}")
+                context.log(f"已完成目标{label}次数: {total}")
                 return
     finally:
         context._record_count_progress(target_cycles, total, action_key="s3")
@@ -139,7 +145,7 @@ def run(
                 win32evtlog.CloseEventLog(hand)
             except Exception as exc:
                 context.logger.warning(f"S3 Final close error: {exc}")
-        context.log("停止S3事件监控.")
+        context.log(f"停止{label}事件监控.")
         if s3_done_event:
             s3_done_event.set()
         else:
