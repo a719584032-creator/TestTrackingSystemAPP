@@ -461,6 +461,11 @@ class Patvs_Fuction:
         )
         return datetime.datetime.now()
 
+    def _refresh_case_start_time(self) -> None:
+        """动作完成后刷新开始时间，避免复用旧事件。"""
+        with self.state_lock:
+            self.case_start_time = datetime.datetime.now().isoformat()
+
     def _bootstrap_event_progress( self, start_time, match_event: Callable[[object], bool]):
         """
         监控之前先获取历史记录，返回最后一次的执行记录
@@ -920,6 +925,7 @@ class Patvs_Fuction:
                     # 打印结果
                     if remaining_after <= 0:
                         self.log(f"动作 {action} 完成")
+                        self._refresh_case_start_time()
                     else:
                         if unit_after == "seconds":
                             self.log(f"动作 {action} 未完成，剩余测试时间: {remaining_after / 60:g} min ({remaining_after:g} 秒)")
