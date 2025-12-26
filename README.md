@@ -1,28 +1,38 @@
 # TTS 测试执行客户端
 
-全新一代的 Test Tracking System（TTS）桌面客户端，基于 **Python 3.10+** 与 **PyQt5** 构建，专注于计划调度、用例执行与硬件监控。项目已完成从旧版 PATVS UI 的迁移，保留了核心的硬件监控脚本，并在全新的模块化架构中整合。
+Test Tracking System（TTS）桌面客户端，基于 **Python 3.10+** 与 **PyQt5** 构建，专注于计划调度、用例执行与硬件监控。
 
 ## 技术栈
 - Python 3.10 或更高版本
 - PyQt5（桌面 UI）
 - Requests（HTTP 通信）
-- Cryptography（本地凭据加密）
+- Cryptography（本地凭据加密与监控状态持久化）
 - PyInstaller（桌面应用打包）
+- 监控相关（Windows）
+  - pywin32（Win32 API：事件日志、设备通知、会话锁定、电源与窗口消息）
+  - WMI + pythoncom（显示/HDMI 相关状态采集）
+  - psutil（电源、设备状态探测）
+  - pynput（键盘/鼠标事件采集）
+  - pycaw + comtypes（音量与音频端点控制/监听）
+  - screen-brightness-control（屏幕亮度检测/设置）
+  - opencv-python（摄像头与画面采集） 
+  - mutagen（录音文件解析与校验）
 
 ## 目录总览
 ```
 TestTrackingSystemAPP/
 ├── run.py                 # 直接启动客户端的入口脚本
 ├── build.py               # PyInstaller 打包工具
-├── build/                 # 打包配置与资源
 ├── config/                # 配置与路径管理
 ├── services/              # 与后端/本地存储交互的服务层
 ├── models/                # 领域模型定义
-├── monitoring/            # Qt 适配层 + 遗留监控脚本
+├── monitoring/            # Qt 适配层 + 监控脚本
+│   └── actions/            # 具体的监控动作实现
 ├── ui/                    # PyQt5 界面与状态持久化
 ├── widgets/               # 预留的复用控件目录
 ├── utils/                 # 日志、异常、存储等通用工具
 ├── resources/             # 静态资源目录
+├── scripts/               # 辅助脚本
 ├── logs/                  # 运行时日志输出目录（默认空）
 ├── data/                  # 运行时数据缓存目录（默认空）
 ├── requirements.txt       # 运行所需的三方依赖
@@ -41,6 +51,8 @@ TestTrackingSystemAPP/
 | `config/settings.py`、`config/paths.py` | 定义客户端运行参数（API、OTA、日志、窗口状态等）并根据平台生成默认目录。 |
 | `models/domain.py` | 将后端 JSON 转换为 Python 数据类，覆盖部门、项目、计划、用例、执行结果等核心实体。 |
 | `monitoring/manager.py`、`monitoring/parser.py` | Qt 适配层，解析监控关键字并调用遗留的硬件监控实现。 |
+| `monitoring/actions/*` | 具体监控动作实现（电源/USB/显示/摄像头/音量/键鼠等）。 |
+| `monitoring/session_store.py` | 监控执行态与证据缓存的恢复与持久化。 |
 | `utils/logging.py`、`utils/storage.py`、`utils/security.py`、`utils/exceptions.py` | 提供日志配置、JSON 读写、凭据加解密、异常定义等通用能力。 |
 | `resources/__init__.py` | 指向静态资源目录的路径常量，供 UI 或打包脚本引用。 |
 | `build.py` | PyInstaller 打包脚本，生成独立可执行文件。 |
@@ -56,13 +68,8 @@ TestTrackingSystemAPP/
      ```
 
 2. **安装依赖**
-   - 生产环境推荐：
      ```bash
      pip install -r requirements.txt
-     ```
-   - 或使用项目元数据（包含最小依赖集）：
-     ```bash
-     pip install .
      ```
 
 3. **启动客户端**
@@ -70,7 +77,6 @@ TestTrackingSystemAPP/
      ```bash
      python run.py
      ```
-   - 安装为可执行脚本后，也可通过 `tts-client` 命令启动（`pyproject.toml` 中的 `project.scripts` 定义）。
    - 若使用 PyInstaller 打包，可直接双击生成的 `.exe` 文件运行。
 
 ## 配置与运行时数据
@@ -95,4 +101,3 @@ TestTrackingSystemAPP/
 - `ui/main_window.py` 包含大量 UI 与业务绑定逻辑，建议通过 `monitoring/parser.py`、`monitoring/manager.py` 等解耦层进行扩展，避免直接依赖遗留脚本。
 - 需要新增 API 时，在 `services/api_client.py` 中补充方法并扩展数据模型。提交结果时可参考 `submit_result` 的参数构建。
 - 若需调整 OTA 渠道或日志目录，可直接修改 `config/settings.py` 或在外部封装动态配置加载逻辑。
-

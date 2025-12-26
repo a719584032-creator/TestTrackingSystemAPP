@@ -47,6 +47,14 @@ from .nine_grid import NINE_GRID_LABEL_ALIASES
 
 logger = logging.getLogger(__name__)
 
+_DISPLAY_ACTION_ALIASES = {
+    "lidcloses3": "s3",
+    "startmenus3": "s3",
+    "startmenus4": "s4",
+    "displayoff(1min)": "时间",
+    "coldboot": "时间",
+}
+
 
 class Patvs_Fuction:
     """负责任务编排的监控上下文。"""
@@ -136,7 +144,8 @@ class Patvs_Fuction:
         except (TypeError, ValueError):
             numeric_amount = 0.0
         action_key = action.strip().lower()
-        if "时间" in action or action_key == "time":
+        normalized_action = self.normalize_action(action)
+        if "时间" in action or action_key == "time" or normalized_action in {"时间", "time"}:
             # 时间转成秒
             seconds = max(0, int(math.ceil(numeric_amount * 60)))
             normalized.update(
@@ -192,11 +201,13 @@ class Patvs_Fuction:
                 normalized["s3_progress"] = max(0.0, s3_progress)
                 normalized["power_progress"] = max(0.0, power_progress)
             name_key = str(name).strip().lower()
+            normalized_action = self.normalize_action(name)
             if (
                 normalized["unit"] == "seconds"
                 and normalized["target"]
                 and "时间" not in str(name)
                 and name_key != "time"
+                and normalized_action not in {"时间", "time"}
             ):
                 normalized["unit"] = "count"
             return normalized
@@ -639,7 +650,8 @@ class Patvs_Fuction:
     def normalize_action(self, action):
         """ 规范化动作格式 """
         normalized = str(action).lower().replace(" ", "")
-        return NINE_GRID_LABEL_ALIASES.get(normalized, normalized)
+        mapped = NINE_GRID_LABEL_ALIASES.get(normalized, normalized)
+        return _DISPLAY_ACTION_ALIASES.get(mapped, mapped)
 
     def run_main(self, case_id, action_and_num, start_time):
         """ 根据用例关键字统一调用监控， action_and_num示例: [("S3", 5), ("USB插拔", 10), ("时间", 30)] """
