@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import json
 import logging
 import os
@@ -45,6 +46,8 @@ from monitoring.actions.luyin import get_audio_duration_seconds
 from services.api_client import ApiClient, encode_attachment
 from services.ota import UpdateInfo
 from services.update_manager import UpdateManager
+from ui.display_case_dialog import DisplayCaseDialog, DisplayCaseSelection
+from ui.port_permutation_dialog import PortPermutationDialog
 from ui.nine_grid_order_dialog import NineGridOrderDialog
 from ui.state import WindowStateStore
 from utils.exceptions import AuthenticationError, ClientError, NetworkError, UpdateError, ValidationError
@@ -600,9 +603,10 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         case_layout.addWidget(self._precondition_label)
 
-        detail_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        detail_splitter.setChildrenCollapsible(False)
-        detail_splitter.setHandleWidth(8)
+        detail_container = QtWidgets.QWidget()
+        detail_layout = QtWidgets.QVBoxLayout(detail_container)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(8)
 
         steps_section = QtWidgets.QWidget()
         steps_layout = QtWidgets.QVBoxLayout(steps_section)
@@ -616,11 +620,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._steps_view.setReadOnly(True)
         self._steps_view.setPlaceholderText("暂无执行步骤")
         self._steps_view.setMinimumHeight(200)
+        self._steps_view.setViewportMargins(0, 0, 0, 16)
+        self._steps_view.document().setDocumentMargin(8)
         self._steps_view.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
         steps_layout.addWidget(self._steps_view)
-        detail_splitter.addWidget(steps_section)
+        detail_layout.addWidget(steps_section, stretch=5)
+
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.HLine)
+        separator.setFrameShadow(QtWidgets.QFrame.Sunken)
+        separator.setLineWidth(1)
+        separator.setStyleSheet("color: #9CA3AF;")
+        detail_layout.addWidget(separator)
 
         expected_section = QtWidgets.QWidget()
         expected_layout = QtWidgets.QVBoxLayout(expected_section)
@@ -634,15 +647,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._expected_view.setReadOnly(True)
         self._expected_view.setPlaceholderText("暂无预期结果")
         self._expected_view.setMinimumHeight(120)
+        self._expected_view.setViewportMargins(0, 0, 0, 16)
+        self._expected_view.document().setDocumentMargin(8)
         self._expected_view.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
         expected_layout.addWidget(self._expected_view)
-        detail_splitter.addWidget(expected_section)
-        detail_splitter.setStretchFactor(0, 5)
-        detail_splitter.setStretchFactor(1, 3)
+        detail_layout.addWidget(expected_section, stretch=3)
 
-        case_layout.addWidget(detail_splitter, stretch=1)
+        case_layout.addWidget(detail_container, stretch=1)
 
         self._attachment_hint = QtWidgets.QLabel("")
         self._attachment_hint.setStyleSheet("color: #2563eb;")
@@ -664,6 +677,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_status.setStyleSheet("color: #6B7280;")
         self._audio_log_status.setWordWrap(True)
         audio_row.addWidget(self._audio_log_status, 1)
+
+        self._display_case_btn = QtWidgets.QPushButton("DisplayCase")
+        audio_row.addWidget(self._display_case_btn)
+
+        self._port_permutation_btn = QtWidgets.QPushButton("多口排列用例")
+        audio_row.addWidget(self._port_permutation_btn)
 
         self._select_audio_logs_btn = QtWidgets.QPushButton("选择日志")
         self._clear_audio_logs_btn = QtWidgets.QPushButton("清除")
@@ -811,6 +830,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._directory_filter,
             self._result_filter,
             self._refresh_btn,
+            self._display_case_btn,
             self._select_audio_logs_btn,
             self._clear_audio_logs_btn,
         ]
@@ -931,6 +951,159 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_audio_log_hint()
         self.save_state()
 
+    def _open_display_case_dialog(self) -> None:
+        plan_id = self._int_or_none(self._plan_combo.currentData())
+        if plan_id is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "请选择计划",
+                "请先选择计划后再生成 DisplayCase 用例。",
+            )
+            return
+        dialog = DisplayCaseDialog(self)
+        dialog.generate_requested.connect(
+            lambda selections, plan_id=plan_id, dialog=dialog: self._generate_display_cases(
+                plan_id,
+                selections,
+                dialog,
+            )
+        )
+        dialog.exec_()
+
+    def _open_port_permutation_dialog(self) -> None:
+        plan_id = self._int_or_none(self._plan_combo.currentData())
+        if plan_id is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "请选择计划",
+                "请先选择计划后再生成多口排列用例。",
+            )
+            return
+        dialog = PortPermutationDialog(self)
+        dialog.generate_requested.connect(
+            lambda ports, devices, plan_id=plan_id, dialog=dialog: self._generate_port_permutation_cases(
+                plan_id,
+                ports,
+                devices,
+                dialog,
+            )
+        )
+        dialog.exec_()
+
+    def _generate_display_cases(
+        self,
+        plan_id: int,
+        selections: List[DisplayCaseSelection],
+        dialog: QtWidgets.QDialog,
+    ) -> None:
+        if not selections:
+            QtWidgets.QMessageBox.information(self, "暂无组合", "请先添加显示器组合。")
+            return
+        start_index = self._next_display_case_index()
+        cases = []
+        for offset, selection in enumerate(selections):
+            title = f"DisPlayMartixCase{start_index + offset}"
+            cases.append(
+                {
+                    "title": title,
+                    "steps": [
+                        {"no": 1, "action": "Please check attached table, try each connection scenario(one/two/three monitor), set the resolition to max in spec, and set display mode to extend. Them do action for each scenario, below action for 5 cycles each. (Attachment is an example)\n"
+                                            "LID close S3,start menu S3,start menu S4,Restart,hot plug,display off(1min),Cold boot", "expected": ""},
+                        {"no": 2, "action": selection.action_text(), "expected": ""},
+                    ],
+                    "expected_result": "1. No error message\n2. No blinking\n3. No garbage\n4. Monitor display normal\n5. Display mode can keep\n6.Resolution and refresh rate can keep",
+                    "priority": "P1",
+                    "group_path": "root/DisPlayCase",
+                    "compatibility_testing": False,
+                }
+            )
+        try:
+            self._api.create_display_matrix_cases(plan_id, cases)
+        except ClientError as exc:
+            QtWidgets.QMessageBox.warning(self, "生成用例失败", str(exc))
+            return
+        dialog.accept()
+        QtWidgets.QMessageBox.information(self, "生成用例成功", "已成功生成 DisplayCase 用例。")
+        self._on_plan_changed(self._plan_combo.currentIndex())
+
+    def _generate_port_permutation_cases(
+        self,
+        plan_id: int,
+        ports: List[str],
+        devices: List[str],
+        dialog: QtWidgets.QDialog,
+    ) -> None:
+        if not ports or not devices:
+            QtWidgets.QMessageBox.information(self, "暂无组合", "请先选择端口并填写设备型号。")
+            return
+        if len(devices) < len(ports):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "设备数量不足",
+                f"设备型号数量 ({len(devices)}) 不能小于选中端口数量 ({len(ports)})。",
+            )
+            return
+        combinations = list(itertools.permutations(devices, len(ports)))
+        if not combinations:
+            QtWidgets.QMessageBox.information(self, "暂无组合", "未生成有效的排列组合。")
+            return
+        start_index = self._next_port_permutation_index()
+        cases = []
+        ports_label = ", ".join(ports)
+        for offset, combination in enumerate(combinations):
+            title = f"MultiPortPermutationCase{start_index + offset}"
+            mapping = ", ".join(
+                f"{port}={device}" for port, device in zip(ports, combination)
+            )
+            cases.append(
+                {
+                    "title": title,
+                    "steps": [
+                        {
+                            "no": 1,
+                            "action": f"端口顺序: {ports_label}\n设备排列: {mapping}",
+                            "expected": "",
+                        }
+                    ],
+                    "expected_result": "功能正常",
+                    "priority": "P1",
+                    "group_path": "root/多口排列组合用例",
+                    "compatibility_testing": False,
+                }
+            )
+        try:
+            self._api.create_display_matrix_cases(plan_id, cases)
+        except ClientError as exc:
+            QtWidgets.QMessageBox.warning(self, "生成用例失败", str(exc))
+            return
+        dialog.accept()
+        QtWidgets.QMessageBox.information(self, "生成用例成功", "已成功生成多口排列用例。")
+        self._on_plan_changed(self._plan_combo.currentIndex())
+
+    def _next_display_case_index(self) -> int:
+        prefix = "DisPlayCase"
+        max_index = 0
+        for case in self._cases:
+            title = (case.title or "").strip()
+            if not title.startswith(prefix):
+                continue
+            suffix = title[len(prefix) :]
+            if suffix.isdigit():
+                max_index = max(max_index, int(suffix))
+        return max_index + 1
+
+    def _next_port_permutation_index(self) -> int:
+        prefix = "MultiPortPermutationCase"
+        max_index = 0
+        for case in self._cases:
+            title = (case.title or "").strip()
+            if not title.startswith(prefix):
+                continue
+            suffix = title[len(prefix) :]
+            if suffix.isdigit():
+                max_index = max(max_index, int(suffix))
+        return max_index + 1
+
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
         # 绑定UI控件方法
@@ -957,6 +1130,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._select_audio_logs_btn.clicked.connect(self._select_audio_logs)
         # 清除 audio 日志
         self._clear_audio_logs_btn.clicked.connect(self._clear_audio_logs)
+        # DisplayCase
+        self._display_case_btn.clicked.connect(self._open_display_case_dialog)
+        # 多口排列
+        self._port_permutation_btn.clicked.connect(self._open_port_permutation_dialog)
         # 结果按钮
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
@@ -1998,6 +2175,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if parts:
                 step_lines.append("\n".join(parts))
         steps_text = "\n\n".join(step_lines) if step_lines else "暂无执行步骤"
+        if step_lines:
+            steps_text += "\n"
         self._steps_view.setPlainText(steps_text)
         self._steps_view.verticalScrollBar().setValue(0)
 
@@ -2054,6 +2233,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._keyword_list.clear()
         for action in self._current_actions:
             self._keyword_list.addItem(f"{action.display_label()} -> {action.amount}")
+        if self._current_case and self._case_has_display_keyword(self._current_case):
+            for action in self._display_keyword_actions():
+                self._keyword_list.addItem(f"{action.display_label()} -> {action.amount:g}")
         if self._current_has_nine_grid:
             if not self._nine_grid_actions:
                 self._keyword_list.addItem("九宫格 -> 未配置动作")
@@ -2101,6 +2283,301 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._normalize_token(str(token)) == "九宫格":
                 return True
         return False
+
+    def _case_has_display_keyword(self, case: Optional[PlanCase]) -> bool:
+        if not case:
+            return False
+        for token in case.keyword_tokens():
+            if self._normalize_token(str(token)) == "display":
+                return True
+        return False
+
+    def _display_keyword_actions(self) -> List[MonitoringAction]:
+        # display 测试次数是固定5次
+        return [
+            MonitoringAction(
+                name="LID close S3",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="start menu S3",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="start menu S4",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="Restart",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="hot plug",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="display off(1min)",
+                amount=5,
+                raw="display",
+            ),
+            MonitoringAction(
+                name="Cold boot",
+                amount=1,
+                raw="display",
+            ),
+        ]
+
+    def _display_case_payload(self, case: PlanCase) -> Optional[Dict[str, str]]:
+        if not case.steps:
+            return None
+        target_step = None
+        for step in case.steps:
+            if step.no is not None and str(step.no).strip() == "2":
+                target_step = step
+                break
+        if not target_step or not target_step.action:
+            return None
+        try:
+            payload = json.loads(target_step.action)
+        except (TypeError, ValueError) as exc:
+            self._logger.warning("DisplayCase action 解析失败: %s", exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _get_connected_display_resolutions(self, include_primary: bool) -> List[str]:
+        """
+        获取当前 Windows 系统中已连接显示器的分辨率信息。
+
+        :param include_primary: 是否包含主显示器
+                                True  -> 返回所有显示器（包含主屏）
+                                False -> 仅返回非主显示器
+        :return: 分辨率字符串列表，格式为 ["1920*1080*60", "3840*2160*144"]
+        """
+
+        # 尝试加载 Windows 显示器相关依赖（pywin32）
+        try:
+            import win32api
+            import win32con
+        except Exception as exc:
+            # 如果运行环境不是 Windows 或缺少依赖，直接返回空列表
+            self._logger.warning("无法加载显示器检测依赖: %s", exc)
+            return []
+
+        # 用于保存所有检测到的显示器信息
+        monitors: List[Dict[str, object]] = []
+
+        # 枚举系统中所有已连接的显示器
+        # EnumDisplayMonitors 返回 (monitor_handle, hdc, rect)
+        for monitor_handle, _, _ in win32api.EnumDisplayMonitors():
+            # 获取显示器的详细信息（设备名、区域、标志位等）
+            info = win32api.GetMonitorInfo(monitor_handle)
+
+            # 获取显示设备名称（如 \\.\DISPLAY1）
+            device = info.get("Device")
+            if not device:
+                continue
+
+            try:
+                # 读取该显示器当前使用的显示模式（分辨率、刷新率等）
+                settings = win32api.EnumDisplaySettings(
+                    device, win32con.ENUM_CURRENT_SETTINGS
+                )
+            except Exception as exc:
+                # 个别显示器读取失败时不影响整体流程
+                self._logger.warning("读取显示器配置失败(%s): %s", device, exc)
+                continue
+
+            # 分辨率宽高（像素）
+            width = getattr(settings, "PelsWidth", None)
+            height = getattr(settings, "PelsHeight", None)
+
+            # 刷新率（Hz），部分设备可能返回 None
+            freq = getattr(settings, "DisplayFrequency", None)
+
+            # 宽高无效则跳过
+            if not width or not height:
+                continue
+
+            # 统一格式化为 "宽*高*刷新率"
+            # 若刷新率为空，则使用 0 占位
+            resolution = f"{int(width)}*{int(height)}*{int(freq or 0)}"
+
+            # 判断该显示器是否为主显示器
+            is_primary = bool(
+                info.get("Flags", 0) & win32con.MONITORINFOF_PRIMARY
+            )
+
+            # 保存当前显示器的信息
+            monitors.append(
+                {
+                    "resolution": resolution,
+                    "is_primary": is_primary,
+                }
+            )
+
+        # 如果没有检测到任何显示器，返回空列表
+        if not monitors:
+            return []
+
+        # 根据参数决定是否包含主显示器
+        if include_primary:
+            selected = monitors
+        else:
+            selected = [
+                item for item in monitors if not item.get("is_primary")
+            ]
+
+        # 返回分辨率字符串列表
+        return [str(item.get("resolution"))  for item in selected if item.get("resolution")]
+
+    def _validate_display_case_resolution(self, case: PlanCase) -> bool:
+        """
+        校验当前系统显示器环境是否符合 DisplayCase 用例的要求。
+
+        校验内容包括：
+        1. 显示器数量是否符合预期
+        2. 当前显示器分辨率是否与用例中定义的分辨率一致
+        3. 是否需要包含主显示器参与校验
+
+        :param case: 测试计划中的显示器相关用例
+        :return: 校验通过返回 True，否则返回 False
+        """
+
+        # =========================
+        # 1. 解析用例中的显示器配置
+        # =========================
+        payload = self._display_case_payload(case)
+        if not payload:
+            # 用例无法解析出显示器相关字段，直接提示用户
+            QtWidgets.QMessageBox.warning(
+                self,
+                "用例解析失败",
+                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
+            )
+            return False
+
+        # =========================
+        # 2. 校验期望的显示器数量
+        # =========================
+        monitor_qty_raw = payload.get("monitor_qty")
+
+        # 尝试将显示器数量解析为整数
+        try:
+            expected_qty = int(str(monitor_qty_raw).strip())
+        except (TypeError, ValueError):
+            expected_qty = -1
+
+        # 数量非法则视为用例无效
+        if expected_qty <= 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "用例解析失败",
+                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
+            )
+            return False
+
+        # =========================
+        # 3. 提取用例中定义的期望分辨率列表
+        # =========================
+        resolution_fields = (
+            "tbt_monitor",  # Thunderbolt 显示器
+            "type_c_monitor",  # Type-C 显示器
+            "dp1_monitor",  # DP 接口 1
+            "dp2_monitor",  # DP 接口 2
+            "hdmi1_monitor",  # HDMI 接口 1
+            "hdmi2_monitor",  # HDMI 接口 2
+        )
+
+        expected_resolutions = []
+
+        # 遍历各接口字段，收集期望分辨率
+        for field in resolution_fields:
+            value = payload.get(field)
+            if value is None:
+                continue
+
+            text = str(value).strip()
+            if text:
+                # 分辨率格式通常为 "3840*2160*60"
+                expected_resolutions.append(text)
+
+        # 如果没有解析出任何期望分辨率，视为用例不合法
+        if not expected_resolutions:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "用例解析失败",
+                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
+            )
+            return False
+
+        # =========================
+        # 4. 获取当前系统实际显示器分辨率
+        # =========================
+        # 判断是否需要将主显示器也纳入校验范围
+        include_primary = self._display_case_include_primary(payload)
+
+        # 获取当前系统检测到的显示器分辨率列表
+        actual_resolutions = self._get_connected_display_resolutions(include_primary)
+
+        # 根据是否包含主显示器，生成提示文案
+        qty_label = "期望显示器数量" if include_primary else "期望外接显示器数量"
+
+        # =========================
+        # 5. 校验显示器数量是否匹配
+        # =========================
+        if len(actual_resolutions) != expected_qty:
+            message = (
+                "请连接正确的显示器和分辨率。\n"
+                f"{qty_label}: {expected_qty}\n"
+                f"当前检测数量: {len(actual_resolutions)}\n"
+                f"期望分辨率: {', '.join(expected_resolutions)}\n"
+                f"当前分辨率: {', '.join(actual_resolutions) or '未检测到'}"
+            )
+            QtWidgets.QMessageBox.warning(self, "显示器数量不匹配", message)
+            return False
+
+        # =========================
+        # 6. 校验显示器分辨率是否匹配
+        # =========================
+        # 找出当前显示器中未包含在期望分辨率列表中的项
+        missing = [
+            item for item in actual_resolutions
+            if item not in expected_resolutions
+        ]
+
+        if missing:
+            message = (
+                "请连接正确的显示器和分辨率。\n"
+                f"期望分辨率: {', '.join(expected_resolutions)}\n"
+                f"当前分辨率: {', '.join(actual_resolutions)}\n"
+                f"未匹配分辨率: {', '.join(missing)}"
+            )
+            QtWidgets.QMessageBox.warning(self, "显示器分辨率不匹配", message)
+            return False
+
+        # =========================
+        # 7. 校验通过
+        # =========================
+        return True
+
+    def _display_case_include_primary(self, payload: Dict[str, str]) -> bool:
+        """ 是否包含主显示器 """
+        lcd_state = payload.get("lcd_off_on")
+        if lcd_state is None:
+            return True
+        normalized = self._normalize_token(str(lcd_state))
+        if normalized == "off":
+            return False
+        if normalized == "on":
+            return True
+        return True
 
     def _load_nine_grid_actions(self) -> List[NineGridAction]:
         detail = self._plan_detail
@@ -2177,6 +2654,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     )
                     if confirm != QtWidgets.QMessageBox.Yes:
                         return
+            if self._current_case and self._case_has_display_keyword(self._current_case):
+                if not self._validate_display_case_resolution(self._current_case):
+                    return
             monitoring_actions = [
                 action
                 for action in self._current_actions
@@ -2185,6 +2665,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 and not self._is_crystaldiskmark_action(action)
                 and not self._is_transitioncap_action(action)
             ]
+            if self._current_case and self._case_has_display_keyword(self._current_case):
+                monitoring_actions.extend(self._display_keyword_actions())
             start_time = dt.datetime.now(dt.timezone.utc).isoformat()
             if self._current_case and self._current_case.id:
                 self._case_execution_start_times[int(self._current_case.id)] = start_time
@@ -2284,7 +2766,7 @@ class MainWindow(QtWidgets.QMainWindow):
         attachments: Sequence[Dict[str, str]],
         required_minutes: Optional[float],
     ) -> bool:
-        """Ensure at least one attachment meets the recording duration requirement."""
+        """确保至少有一个录音附件满足时长要求。"""
 
         if required_minutes is None or required_minutes <= 0:
             return True

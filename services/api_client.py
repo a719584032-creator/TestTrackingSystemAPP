@@ -88,6 +88,16 @@ class ApiClient:
         cases = payload.get("data", {}).get("cases", [])
         return [PlanCase.from_dict(case) for case in cases]
 
+    def create_display_matrix_cases(
+        self, plan_id: int, cases: Sequence[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        body = {"cases": list(cases)}
+        return self._request(
+            "POST",
+            f"/test-plans/{plan_id}/display-matrix-cases",
+            json=body,
+        )
+
     def submit_result(
         self,
         plan_id: int,
