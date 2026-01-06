@@ -2327,7 +2327,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
             MonitoringAction(
                 name="Cold boot",
-                amount=1,
+                amount=5,
                 raw="display",
             ),
         ]

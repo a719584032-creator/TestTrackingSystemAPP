@@ -1,4 +1,4 @@
-"""Nine-grid action configuration and label mapping."""
+"""九宫格监控动作定义"""
 from __future__ import annotations
 
 from dataclasses import dataclass

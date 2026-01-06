@@ -29,6 +29,7 @@ DEFAULT_CLASS_GUIDS: Tuple[str, ...] = (
     # GUID_DEVINTERFACE_HID,
     GUID_DEVINTERFACE_NET,
 )
+DEFAULT_BATCH_WINDOW = 1.5
 
 
 def _normalize_key(value) -> str:
@@ -50,6 +51,7 @@ class InterfaceNotification:
         action_label="设备接口热插拔",
         log_arrival=False,
         dedupe_window=0.6,
+        batch_window=DEFAULT_BATCH_WINDOW,
     ):
         self.context = context
         try:
@@ -76,7 +78,12 @@ class InterfaceNotification:
             self.dedupe_window = max(0.0, float(dedupe_window))
         except (TypeError, ValueError):
             self.dedupe_window = 0.0
+        try:
+            self.batch_window = max(0.0, float(batch_window))
+        except (TypeError, ValueError):
+            self.batch_window = 0.0
         self._event_cache: dict[tuple[int, str], float] = {}
+        self._last_removal_time: float | None = None
         self.init_notification_window()
         logger.info(
             "Initialized Hotplug Notification with cycles_count: %s, target_cycles: %s",
@@ -153,15 +160,28 @@ class InterfaceNotification:
             return 1
         self._event_cache[cache_key] = now
         if wparam == win32con.DBT_DEVICEREMOVECOMPLETE:
-            self.cycles_count += 1
-            self.context.log(
-                f"检测到 {self.action_label}移除: {device_name}，当前插拔次数: {self.cycles_count}"
-            )
-            self.context.record_count_progress_if_current(
-                self.target_cycles,
-                self.cycles_count,
-                expected_keys=self.expected_keys,
-            )
+            merged = False
+            if (
+                self.batch_window
+                and self._last_removal_time is not None
+                and now - self._last_removal_time < self.batch_window
+            ):
+                merged = True
+            self._last_removal_time = now
+            if merged:
+                self.context.log(
+                    f"检测到 {self.action_label}移除: {device_name}，已合并为同一次插拔"
+                )
+            else:
+                self.cycles_count += 1
+                self.context.log(
+                    f"检测到 {self.action_label}移除: {device_name}，当前插拔次数: {self.cycles_count}"
+                )
+                self.context.record_count_progress_if_current(
+                    self.target_cycles,
+                    self.cycles_count,
+                    expected_keys=self.expected_keys,
+                )
         elif wparam == win32con.DBT_DEVICEARRIVAL and self.log_arrival:
             self.context.log(f"检测到 {self.action_label}接入: {device_name}")
 

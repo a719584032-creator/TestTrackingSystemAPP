@@ -47,12 +47,13 @@ from .nine_grid import NINE_GRID_LABEL_ALIASES
 
 logger = logging.getLogger(__name__)
 
+# display 动作定义
 _DISPLAY_ACTION_ALIASES = {
     "lidcloses3": "s3",
     "startmenus3": "s3",
     "startmenus4": "s4",
-    "displayoff(1min)": "时间",
-    "coldboot": "时间",
+    "displayoff(1min)": "锁屏",
+    "coldboot": "s5",
 }
 
 

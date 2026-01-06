@@ -77,7 +77,13 @@ class ApiClient:
                 "page_size": 100,
             },
         )
-        return [TestPlan.from_dict(item) for item in payload.get("data", {}).get("items", [])]
+        items = payload.get("data", {}).get("items", [])
+        active_items = [
+            item
+            for item in items
+            if str(item.get("status", "")).strip().lower() == "active"
+        ]
+        return [TestPlan.from_dict(item) for item in active_items]
 
     def get_plan_detail(self, plan_id: int) -> PlanDetail:
         payload = self._request("GET", f"/test-plans/{plan_id}")

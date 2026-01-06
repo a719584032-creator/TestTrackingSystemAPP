@@ -142,6 +142,10 @@ class DisplayCaseDialog(QtWidgets.QDialog):
         add_button.setMinimumWidth(120)
         add_button.clicked.connect(self._add_selection)
 
+        clear_button = QtWidgets.QPushButton("清除选项")
+        clear_button.setMinimumWidth(120)
+        clear_button.clicked.connect(self._reset_form)
+
         remove_button = QtWidgets.QPushButton("移除选中")
         remove_button.setMinimumWidth(120)
         remove_button.clicked.connect(self._remove_selection)
@@ -149,6 +153,7 @@ class DisplayCaseDialog(QtWidgets.QDialog):
         button_column = QtWidgets.QVBoxLayout()
         button_column.setSpacing(8)
         button_column.addWidget(add_button)
+        button_column.addWidget(clear_button)
         button_column.addWidget(remove_button)
         button_column.addStretch()
 
@@ -262,6 +267,7 @@ class DisplayCaseDialog(QtWidgets.QDialog):
             item = QtWidgets.QTableWidgetItem(value)
             item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEditable)
             self._table.setItem(row, col, item)
+        self._reset_form()
 
     def _remove_selection(self) -> None:
         if not self._table:
@@ -281,3 +287,21 @@ class DisplayCaseDialog(QtWidgets.QDialog):
 
     def selections(self) -> List[DisplayCaseSelection]:
         return list(self._selections)
+
+    def _reset_form(self) -> None:
+        if self._system_port_combo:
+            self._system_port_combo.setCurrentIndex(0)
+        if self._lcd_combo:
+            self._lcd_combo.setCurrentIndex(0)
+        if self._monitor_qty_combo:
+            self._monitor_qty_combo.setCurrentIndex(0)
+        for combo in (
+            self._tbt_monitor_combo,
+            self._type_c_monitor_combo,
+            self._dp1_monitor_combo,
+            self._dp2_monitor_combo,
+            self._hdmi1_monitor_combo,
+            self._hdmi2_monitor_combo,
+        ):
+            if combo:
+                combo.setCurrentIndex(-1)

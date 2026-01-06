@@ -76,6 +76,7 @@ class TestPlan:
     name: str
     project_id: int
     department_id: int
+    status: Optional[str]
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "TestPlan":
@@ -84,6 +85,7 @@ class TestPlan:
             name=payload.get("name", ""),
             project_id=payload.get("project_id"),
             department_id=payload.get("department_id"),
+            status=payload.get("status"),
         )
 
 
