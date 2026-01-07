@@ -1118,6 +1118,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plan_combo.currentIndexChanged[int].connect(self._on_plan_changed)
         # 模块目录
         self._directory_filter.currentIndexChanged.connect(self._apply_filters)
+        self._directory_filter.currentIndexChanged.connect(
+            self._update_directory_tooltip
+        )
         # 设备
         self._device_filter.currentIndexChanged.connect(self._apply_filters)
         # 结果
@@ -1618,9 +1621,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._directory_filter.clear()
         self._directory_filter.addItem("请选择模块目录", None)
         for directory in directories:
-            self._directory_filter.addItem(directory, directory)
+            label = self._format_directory_label(directory)
+            self._directory_filter.addItem(label, directory)
+            index = self._directory_filter.count() - 1
+            self._directory_filter.setItemData(
+                index,
+                directory,
+                QtCore.Qt.ToolTipRole,
+            )
         self._directory_filter.blockSignals(False)
         self._directory_filter.setCurrentIndex(0)
+        self._update_directory_tooltip()
 
     def _set_combobox_current_data(
         self, combo: QtWidgets.QComboBox, value: object
@@ -1654,6 +1665,13 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._set_combobox_current_data(self._device_filter, state.get("device"))
         self._set_combobox_current_data(self._result_filter, state.get("result"))
+        self._update_directory_tooltip()
+
+    def _update_directory_tooltip(self) -> None:
+        if not self._directory_filter:
+            return
+        current_text = self._directory_filter.currentData()
+        self._directory_filter.setToolTip(current_text or "")
 
     def _format_device_label(
         self,
@@ -1961,6 +1979,21 @@ class MainWindow(QtWidgets.QMainWindow):
         if normalized == "未分组":
             return ["未分组"]
         return normalized.split("/")
+
+    def _format_directory_label(self, directory: str) -> str:
+        if not directory or directory == "未分组":
+            return directory
+        max_length = 48
+        if len(directory) <= max_length:
+            return directory
+        parts = directory.split("/")
+        if len(parts) <= 2:
+            return f"{directory[: max_length - 3]}..."
+        tail = "/".join(parts[-2:])
+        label = f".../{tail}"
+        if len(label) <= max_length:
+            return label
+        return f".../{tail[-(max_length - 4):]}"
 
     def _status_color(self, entry: CaseDisplayEntry) -> Optional[str]:
         """ 用例状态颜色设置 """
