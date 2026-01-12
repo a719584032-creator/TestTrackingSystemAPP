@@ -10,7 +10,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import requests
 
 from config.settings import SETTINGS
-from models import Department, PlanCase, PlanDetail, Project, TestPlan
+from models import (
+    Department,
+    PlanCaseQueryResult,
+    PlanDetail,
+    Project,
+    TestPlan,
+)
 from utils.exceptions import AuthenticationError, ClientError, NetworkError
 from utils.security import encode_timestamp_token
 
@@ -89,10 +95,24 @@ class ApiClient:
         payload = self._request("GET", f"/test-plans/{plan_id}")
         return PlanDetail.from_dict(payload.get("data", {}))
 
-    def get_plan_cases(self, plan_id: int) -> List[PlanCase]:
-        payload = self._request("GET", f"/test-plans/{plan_id}/cases")
-        cases = payload.get("data", {}).get("cases", [])
-        return [PlanCase.from_dict(case) for case in cases]
+    def get_plan_cases(
+        self,
+        plan_id: int,
+        *,
+        group_path: Optional[str] = None,
+        device_model_id: Optional[int] = None,
+        status: Optional[str] = None,
+        page_size: int = 1000,
+    ) -> PlanCaseQueryResult:
+        params: Dict[str, Any] = {"page": 1, "page_size": page_size}
+        if group_path:
+            params["group_path"] = group_path
+        if device_model_id is not None:
+            params["device_model_id"] = device_model_id
+        if status:
+            params["status"] = status
+        payload = self._request("GET", f"/test-plans/{plan_id}/cases", params=params)
+        return PlanCaseQueryResult.from_payload(payload)
 
     def create_display_matrix_cases(
         self, plan_id: int, cases: Sequence[Dict[str, Any]]

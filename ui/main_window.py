@@ -17,6 +17,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from models import (
     CaseExecutionResult,
     Department,
+    GroupTreeNode,
     PlanCase,
     PlanDetail,
     Project,
@@ -52,6 +53,7 @@ from ui.nine_grid_order_dialog import NineGridOrderDialog
 from ui.state import WindowStateStore
 from utils.exceptions import AuthenticationError, ClientError, NetworkError, UpdateError, ValidationError
 from config.settings import APP_VERSION, SETTINGS
+from widgets import DirectoryTreeCombo
 
 
 
@@ -104,6 +106,7 @@ class RefreshResult:
     plans: List[TestPlan] = field(default_factory=list)
     plan_detail: Optional[PlanDetail] = None
     cases: List[PlanCase] = field(default_factory=list)
+    group_tree: Optional[GroupTreeNode] = None
     selected_department_id: Optional[int] = None
     selected_project_id: Optional[int] = None
     selected_plan_id: Optional[int] = None
@@ -331,6 +334,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._projects: List[Project] = []
         self._plans: List[TestPlan] = []
         self._cases: List[PlanCase] = []
+        self._group_tree: Optional[GroupTreeNode] = None
         self._filtered_entries: List[CaseDisplayEntry] = []
         self._current_entry: Optional[CaseDisplayEntry] = None
         self._current_case: Optional[PlanCase] = None
@@ -432,9 +436,10 @@ class MainWindow(QtWidgets.QMainWindow):
         filter_layout.addWidget(self._plan_combo, 0, 5)
 
         filter_layout.addWidget(QtWidgets.QLabel("模块目录"), 1, 0)
-        self._directory_filter = QtWidgets.QComboBox()
-        self._directory_filter.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
-        self._directory_filter.addItem("请选择模块目录", None)
+        self._directory_filter = DirectoryTreeCombo(
+            all_label="全部目录",
+            ungrouped_label="未分组",
+        )
         filter_layout.addWidget(self._directory_filter, 1, 1)
 
         filter_layout.addWidget(QtWidgets.QLabel("机型"), 1, 2)
@@ -999,7 +1004,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not selections:
             QtWidgets.QMessageBox.information(self, "暂无组合", "请先添加显示器组合。")
             return
-        start_index = self._next_display_case_index()
+        start_index = self._next_display_case_index(plan_id)
         cases = []
         for offset, selection in enumerate(selections):
             title = f"DisPlayMartixCase{start_index + offset}"
@@ -1047,7 +1052,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not combinations:
             QtWidgets.QMessageBox.information(self, "暂无组合", "未生成有效的排列组合。")
             return
-        start_index = self._next_port_permutation_index()
+        start_index = self._next_port_permutation_index(plan_id)
         cases = []
         ports_label = ", ".join(ports)
         for offset, combination in enumerate(combinations):
@@ -1080,10 +1085,18 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "生成用例成功", "已成功生成多口排列用例。")
         self._on_plan_changed(self._plan_combo.currentIndex())
 
-    def _next_display_case_index(self) -> int:
+    def _fetch_all_cases_for_plan(self, plan_id: int) -> List[PlanCase]:
+        try:
+            result = self._api.get_plan_cases(plan_id, page_size=1000)
+            return result.items
+        except ClientError as exc:
+            self._logger.warning("加载计划用例失败: %s", exc)
+            return list(self._cases)
+
+    def _next_display_case_index(self, plan_id: int) -> int:
         prefix = "DisPlayCase"
         max_index = 0
-        for case in self._cases:
+        for case in self._fetch_all_cases_for_plan(plan_id):
             title = (case.title or "").strip()
             if not title.startswith(prefix):
                 continue
@@ -1092,10 +1105,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 max_index = max(max_index, int(suffix))
         return max_index + 1
 
-    def _next_port_permutation_index(self) -> int:
+    def _next_port_permutation_index(self, plan_id: int) -> int:
         prefix = "MultiPortPermutationCase"
         max_index = 0
-        for case in self._cases:
+        for case in self._fetch_all_cases_for_plan(plan_id):
             title = (case.title or "").strip()
             if not title.startswith(prefix):
                 continue
@@ -1117,9 +1130,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # 计划
         self._plan_combo.currentIndexChanged[int].connect(self._on_plan_changed)
         # 模块目录
-        self._directory_filter.currentIndexChanged.connect(self._apply_filters)
-        self._directory_filter.currentIndexChanged.connect(
-            self._update_directory_tooltip
+        self._directory_filter.currentDataChanged.connect(
+            self._on_directory_filter_changed
         )
         # 设备
         self._device_filter.currentIndexChanged.connect(self._apply_filters)
@@ -1518,6 +1530,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if plan_id is None:
             self._pending_filter_state = None
             self._cases = []
+            self._group_tree = None
             self._plan_detail = None
             self._update_plan_summary()
             self._refresh_directory_filter()
@@ -1552,51 +1565,40 @@ class MainWindow(QtWidgets.QMainWindow):
             self._plan_detail = None
         self._update_plan_summary()
 
-        try:
-            self._cases = self._api.get_plan_cases(plan_id)
-        except ClientError as exc:
-            QtWidgets.QMessageBox.warning(self, "加载用例失败", str(exc))
-            self._cases = []
-        else:
-            self._logger.info("计划 %s 用例数量: %d", plan.name, len(self._cases))
+        filter_state = self._pending_filter_state or {}
+        group_path = self._coerce_group_path(filter_state.get("directory"))
+        device_model_id = self._int_or_none(filter_state.get("device"))
+        status = self._normalize_status_param(filter_state.get("result"))
+
+        self._cases = []
+        self._group_tree = None
+        self._load_plan_cases(
+            plan_id,
+            group_path=group_path,
+            device_model_id=device_model_id,
+            status=status,
+            update_group_tree=True,
+        )
 
         self._refresh_directory_filter()
         self._refresh_device_filter()
         self._restore_pending_filters()
-        self._apply_filters()
+        self._refresh_case_entries()
         self.save_state()
 
     def _refresh_device_filter(self) -> None:
         """ 设备过滤筛选 """
         devices: Dict[int, str] = {}
-        requires_device_filter = False
-        # 从所有case中提取设备ID和名称
-        for case in self._cases:
-            compatibility_enabled = bool(getattr(case, "compatibility_testing", False))
-            case_has_devices = False
-            for model in case.device_models:
-                if getattr(model, "id", None) is None:
+        detail = self._plan_detail
+        if detail:
+            for model in detail.device_models:
+                model_id = getattr(model, "id", None)
+                if model_id is None:
                     continue
-                label = self._format_device_label(model.name, model.model_code, model.id)
-                devices[int(model.id)] = label
-                case_has_devices = True
-            if compatibility_enabled and case_has_devices:
-                requires_device_filter = True
-            for execution in case.execution_results or []:
-                if not execution.device_model_id:
-                    continue
-                device_id = int(execution.device_model_id)
-                if device_id not in devices:
-                    label = self._format_device_label(
-                        execution.device_model_name,
-                        execution.device_model_code,
-                        device_id,
-                    )
-                    devices[device_id] = label
-                if compatibility_enabled and case_has_devices:
-                    requires_device_filter = True
+                label = self._format_device_label(model.name, model.model_code, model_id)
+                devices[int(model_id)] = label
 
-        self._device_filter_required = bool(devices) and requires_device_filter
+        self._device_filter_required = bool(devices)
         self._device_filter.blockSignals(True)
         self._device_filter.clear()
         self._device_filter.addItem("请选择机型", None)
@@ -1607,30 +1609,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_filter.setCurrentIndex(0)
 
     def _refresh_directory_filter(self) -> None:
-        """ 模块目录过滤筛选 """
-        directories: List[str] = []
-        seen: set[str] = set()
-        # 从所有用例中提取模块目录
-        for case in self._cases:
-            directory = self._normalize_directory(case.group_path)
-            if directory not in seen:
-                seen.add(directory)
-                directories.append(directory)
-        directories.sort()
+        """模块目录过滤筛选（来自服务端 group_tree）。"""
         self._directory_filter.blockSignals(True)
-        self._directory_filter.clear()
-        self._directory_filter.addItem("请选择模块目录", None)
-        for directory in directories:
-            label = self._format_directory_label(directory)
-            self._directory_filter.addItem(label, directory)
-            index = self._directory_filter.count() - 1
-            self._directory_filter.setItemData(
-                index,
-                directory,
-                QtCore.Qt.ToolTipRole,
-            )
-        self._directory_filter.blockSignals(False)
-        self._directory_filter.setCurrentIndex(0)
+        try:
+            self._directory_filter.set_group_tree(self._group_tree)
+        finally:
+            self._directory_filter.blockSignals(False)
         self._update_directory_tooltip()
 
     def _set_combobox_current_data(
@@ -1654,15 +1638,22 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             combo.blockSignals(False)
 
+    def _set_directory_current_data(self, value: object) -> None:
+        self._directory_filter.blockSignals(True)
+        try:
+            self._directory_filter.setCurrentData(
+                value if isinstance(value, str) and value else None
+            )
+        finally:
+            self._directory_filter.blockSignals(False)
+
     def _restore_pending_filters(self) -> None:
         """ 恢复目录/设备/结果三个组合框的当前值。 """
         if not self._pending_filter_state:
             return
         state = self._pending_filter_state
         self._pending_filter_state = None
-        self._set_combobox_current_data(
-            self._directory_filter, state.get("directory")
-        )
+        self._set_directory_current_data(state.get("directory"))
         self._set_combobox_current_data(self._device_filter, state.get("device"))
         self._set_combobox_current_data(self._result_filter, state.get("result"))
         self._update_directory_tooltip()
@@ -1670,8 +1661,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_directory_tooltip(self) -> None:
         if not self._directory_filter:
             return
-        current_text = self._directory_filter.currentData()
-        self._directory_filter.setToolTip(current_text or "")
+        current_tooltip = ""
+        if hasattr(self._directory_filter, "currentToolTip"):
+            current_tooltip = self._directory_filter.currentToolTip()
+        if not current_tooltip:
+            current_tooltip = self._directory_filter.currentData() or ""
+        self._directory_filter.setToolTip(current_tooltip)
 
     def _format_device_label(
         self,
@@ -1807,35 +1802,83 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         return entries
 
-    def _apply_filters(self) -> None:
-        """ 应用筛选：目录、设备、结果过滤用例 """
-        directory_value = self._directory_filter.currentData()
-        device_value = self._device_filter.currentData() if self._device_filter_required else None
-        result_value = self._result_filter.currentData()
-
+    def _refresh_case_entries(self) -> None:
         entries: List[CaseDisplayEntry] = []
         for case in self._cases:
-            if directory_value and self._normalize_directory(case.group_path) != directory_value:
-                continue
-            case_entries = self._build_case_entries(case)
-            for entry in case_entries:
-                if device_value is None and self._device_filter_required and not entry.is_general:
-                    # 未选择机型时仅展示通用用例，避免误显示设备特定记录
-                    continue
-                if device_value is not None:
-                    if isinstance(device_value, int):
-                        if not entry.is_general and entry.device_model_id != int(device_value):
-                            continue
-                    else:
-                        continue
-                if result_value and entry.result_value() != result_value:
-                    continue
-                entries.append(entry)
-
+            entries.extend(self._build_case_entries(case))
         self._filtered_entries = entries
-        self._logger.info("筛选后用例数量: %d", len(self._filtered_entries))
+        self._logger.info("当前用例数量: %d", len(self._filtered_entries))
         self._refresh_case_tree()
         self.save_state()
+
+    def _normalize_status_param(self, value: object) -> Optional[str]:
+        if not value:
+            return None
+        normalized = str(value).strip().lower()
+        mapping = {"blocked": "block", "block": "block", "skipped": "skip", "skip": "skip"}
+        return mapping.get(normalized, normalized)
+
+    def _coerce_group_path(self, value: object) -> Optional[str]:
+        if isinstance(value, str) and value.strip():
+            return value
+        return None
+
+    def _current_filter_params(
+        self,
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+        group_path = self._coerce_group_path(self._directory_filter.currentData())
+        device_model_id = (
+            self._int_or_none(self._device_filter.currentData())
+            if self._device_filter_required
+            else None
+        )
+        status = self._normalize_status_param(self._result_filter.currentData())
+        return group_path, device_model_id, status
+
+    def _load_plan_cases(
+        self,
+        plan_id: int,
+        *,
+        group_path: Optional[str],
+        device_model_id: Optional[int],
+        status: Optional[str],
+        update_group_tree: bool = False,
+    ) -> bool:
+        try:
+            result = self._api.get_plan_cases(
+                plan_id,
+                group_path=group_path,
+                device_model_id=device_model_id,
+                status=status,
+            )
+        except ClientError as exc:
+            QtWidgets.QMessageBox.warning(self, "加载用例失败", str(exc))
+            return False
+        self._cases = result.items
+        if update_group_tree or self._group_tree is None:
+            if result.group_tree is not None:
+                self._group_tree = result.group_tree
+        self._logger.info("计划 %s 用例数量: %d", plan_id, len(self._cases))
+        return True
+
+    def _on_directory_filter_changed(self, _value: object) -> None:
+        self._update_directory_tooltip()
+        self._apply_filters()
+
+    def _apply_filters(self) -> None:
+        """应用筛选：目录、设备、结果过滤用例。"""
+        plan_id = self._int_or_none(self._plan_combo.currentData())
+        if plan_id is None:
+            return
+        group_path, device_model_id, status = self._current_filter_params()
+        if not self._load_plan_cases(
+            plan_id,
+            group_path=group_path,
+            device_model_id=device_model_id,
+            status=status,
+        ):
+            return
+        self._refresh_case_entries()
 
     def _update_plan_summary(self) -> None:
         """ 更新计划进度统计 """
@@ -1968,6 +2011,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _normalize_directory(self, path: Optional[str]) -> str:
         """ 模块分组筛选 """
         if not path:
+            return "未分组"
+        normalized = str(path).strip().lower()
+        if normalized in {"__ungrouped__", "ungrouped", "__none__", "none"}:
             return "未分组"
         # 根目录root不显示
         parts = [part.strip() for part in str(path).split("/") if part and part.lower() != "root"]
@@ -3126,12 +3172,13 @@ class MainWindow(QtWidgets.QMainWindow):
         restore_department_id = self._int_or_none(self._department_combo.currentData())
         restore_project_id = self._int_or_none(self._project_combo.currentData())
         restore_plan_id = self._int_or_none(self._plan_combo.currentData())
+        pending_filters = dict(self._pending_filter_state or {})
         self._restore_department_id = restore_department_id
         self._restore_project_id = restore_project_id
         self._restore_plan_id = restore_plan_id
         thread = threading.Thread(
             target=self._refresh_all_data_worker,
-            args=(restore_department_id, restore_project_id, restore_plan_id),
+            args=(restore_department_id, restore_project_id, restore_plan_id, pending_filters),
             name="RefreshData",
             daemon=True,
         )
@@ -3142,6 +3189,7 @@ class MainWindow(QtWidgets.QMainWindow):
         department_id: Optional[int],
         project_id: Optional[int],
         plan_id: Optional[int],
+        filters: Optional[Dict[str, object]],
     ) -> None:
         """后台线程：获取刷新所需的数据后通知主线程应用。"""
 
@@ -3233,8 +3281,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._logger.exception("刷新计划详情失败: %s", exc)
             result.message = f"刷新计划详情失败: {exc}"
 
+        filter_state = filters or {}
+        group_path = self._coerce_group_path(filter_state.get("directory"))
+        device_model_id = self._int_or_none(filter_state.get("device"))
+        status = self._normalize_status_param(filter_state.get("result"))
         try:
-            result.cases = self._api.get_plan_cases(int(plan_id))
+            cases_result = self._api.get_plan_cases(
+                int(plan_id),
+                group_path=group_path,
+                device_model_id=device_model_id,
+                status=status,
+            )
+            result.cases = cases_result.items
+            result.group_tree = cases_result.group_tree
         except ClientError as exc:
             result.message = f"加载用例失败: {exc}"
         except Exception as exc:  # pragma: no cover
@@ -3285,19 +3344,23 @@ class MainWindow(QtWidgets.QMainWindow):
             result.plans = []
             result.plan_detail = None
             result.cases = []
+            result.group_tree = None
         elif result.selected_project_id is None:
             result.plans = []
             result.plan_detail = None
             result.cases = []
+            result.group_tree = None
         elif result.selected_plan_id is None:
             result.plan_detail = None
             result.cases = []
+            result.group_tree = None
 
         self._departments = result.departments or []
         self._projects = result.projects or []
         self._plans = result.plans or []
         self._plan_detail = result.plan_detail
         self._cases = result.cases or []
+        self._group_tree = result.group_tree
 
         self._restore_department_id = result.selected_department_id
         self._restore_project_id = result.selected_project_id
@@ -3311,7 +3374,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_directory_filter()
         self._refresh_device_filter()
         self._restore_pending_filters()
-        self._apply_filters()
+        self._refresh_case_entries()
         self.save_state()
 
     def _rebuild_department_combo(self) -> None:
@@ -3381,6 +3444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         department_id: Optional[int],
         project_id: Optional[int],
         plan_id: Optional[int],
+        filters: Optional[Dict[str, object]],
     ) -> None:
         """后台线程：获取刷新所需的数据后通知主线程应用。"""
 
@@ -3472,8 +3536,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._logger.exception("刷新计划详情失败: %s", exc)
             result.message = f"刷新计划详情失败: {exc}"
 
+        filter_state = filters or {}
+        group_path = self._coerce_group_path(filter_state.get("directory"))
+        device_model_id = self._int_or_none(filter_state.get("device"))
+        status = self._normalize_status_param(filter_state.get("result"))
         try:
-            result.cases = self._api.get_plan_cases(int(plan_id))
+            cases_result = self._api.get_plan_cases(
+                int(plan_id),
+                group_path=group_path,
+                device_model_id=device_model_id,
+                status=status,
+            )
+            result.cases = cases_result.items
+            result.group_tree = cases_result.group_tree
         except ClientError as exc:
             result.message = f"加载用例失败: {exc}"
         except Exception as exc:  # pragma: no cover

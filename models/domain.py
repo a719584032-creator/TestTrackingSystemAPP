@@ -90,6 +90,34 @@ class TestPlan:
 
 
 @dataclass(slots=True)
+class GroupTreeNode:
+    """用例分组树节点。"""
+
+    name: str
+    path: str
+    children: List["GroupTreeNode"] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> Optional["GroupTreeNode"]:
+        if not isinstance(payload, dict):
+            return None
+        raw_children = payload.get("children") or []
+        children: List[GroupTreeNode] = []
+        if isinstance(raw_children, list):
+            for child in raw_children:
+                if not isinstance(child, dict):
+                    continue
+                node = cls.from_dict(child)
+                if node is not None:
+                    children.append(node)
+        return cls(
+            name=str(payload.get("name") or ""),
+            path=str(payload.get("path") or ""),
+            children=children,
+        )
+
+
+@dataclass(slots=True)
 class PlanStatistics:
     """测试计划进度详情"""
 
@@ -402,6 +430,36 @@ class PlanCase:
         """格式化关键字供 UI 展示。"""
 
         return " ".join(self.keyword_tokens())
+
+
+@dataclass(slots=True)
+class PlanCaseQueryResult:
+    """用例查询响应模型。"""
+
+    items: List[PlanCase] = field(default_factory=list)
+    group_tree: Optional[GroupTreeNode] = None
+    total: int = 0
+    page: int = 1
+    page_size: int = 0
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "PlanCaseQueryResult":
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        raw_items = data.get("items")
+        if raw_items is None:
+            raw_items = data.get("cases", [])
+        items = [PlanCase.from_dict(item) for item in raw_items or []]
+        raw_tree = data.get("group_tree")
+        group_tree = (
+            GroupTreeNode.from_dict(raw_tree) if isinstance(raw_tree, dict) else None
+        )
+        return cls(
+            items=items,
+            group_tree=group_tree,
+            total=int(data.get("total", 0) or 0),
+            page=int(data.get("page", 1) or 1),
+            page_size=int(data.get("page_size", 0) or 0),
+        )
 
 
 def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
