@@ -8,6 +8,36 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from models import GroupTreeNode
 
 
+class _DirectoryTreeWidget(QtWidgets.QTreeWidget):
+    itemSingleClicked = QtCore.pyqtSignal(QtWidgets.QTreeWidgetItem, int)
+    itemConfirmRequested = QtCore.pyqtSignal(QtWidgets.QTreeWidgetItem, int)
+
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._skip_release = False
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() != QtCore.Qt.LeftButton:
+            return
+        item = self.itemAt(event.pos())
+        if item is None:
+            return
+        if self._skip_release:
+            self._skip_release = False
+            return
+        self.itemSingleClicked.emit(item, 0)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        item = self.itemAt(event.pos())
+        if item is None:
+            return
+        self._skip_release = True
+        self.setCurrentItem(item)
+        self.itemConfirmRequested.emit(item, 0)
+        event.accept()
+
+
 class DirectoryTreeCombo(QtWidgets.QWidget):
     """Tree dropdown selector with single-click expand and double-click select."""
 
@@ -49,7 +79,7 @@ class DirectoryTreeCombo(QtWidgets.QWidget):
         popup_layout.setContentsMargins(0, 0, 0, 0)
         popup_layout.setSpacing(0)
 
-        self._tree = QtWidgets.QTreeWidget(self._popup)
+        self._tree = _DirectoryTreeWidget(self._popup)
         self._tree.setHeaderHidden(True)
         self._tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._tree.setUniformRowHeights(True)
@@ -58,8 +88,8 @@ class DirectoryTreeCombo(QtWidgets.QWidget):
         self._tree.setExpandsOnDoubleClick(False)
         popup_layout.addWidget(self._tree)
 
-        self._tree.itemClicked.connect(self._on_item_clicked)
-        self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._tree.itemSingleClicked.connect(self._on_item_clicked)
+        self._tree.itemConfirmRequested.connect(self._on_item_double_clicked)
         self._display.installEventFilter(self)
 
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
