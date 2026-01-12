@@ -11,9 +11,9 @@ from PyQt5.QtWidgets import (
 
 class PopupTreeWidget(QTreeWidget):
     """
-    弹出用目录树：
-    - 点左侧展开三角：仅展开/收起，不触发确认
-    - 点文字区域：触发 textClicked(item)
+    弹出用目录树（稳定版）：
+    - 点击“文本区域”：确认（textClicked）
+    - 点击“文本左侧区域”（含三角/缩进空白）：仅展开/收起，不确认
     """
     textClicked = pyqtSignal(QTreeWidgetItem)
 
@@ -33,42 +33,37 @@ class PopupTreeWidget(QTreeWidget):
             return super().mousePressEvent(event)
 
         index = self.indexFromItem(item, 0)
+        if not index.isValid():
+            return super().mousePressEvent(event)
 
-        # ✅ 命中展开三角：只展开/收起，不确认
-        if index.isValid() and self._hit_disclosure(event.pos(), index):
+        # 只用“文本矩形”来判定：左侧=展开区，右侧=文本确认区
+        text_left = self._text_rect_left(index)
+
+        # 点击在文本左边（含三角/缩进）：只展开/收起
+        if event.pos().x() < text_left and self.model().hasChildren(index):
             item.setExpanded(not item.isExpanded())
             event.accept()
             return
 
-        # ✅ 其余区域：当作点击文字 -> 确认
+        # 否则：当作点击文本/右侧区域 -> 确认
         super().mousePressEvent(event)
         self.textClicked.emit(item)
 
-    def _hit_disclosure(self, pos, index: QModelIndex) -> bool:
+    def _text_rect_left(self, index: QModelIndex) -> int:
         """
-        用 Qt 样式系统计算“展开三角”区域（跨主题更稳定）
+        计算该 item “文本区域”的左边界 x（viewport 坐标）。
+        这是 Qt style 最可靠的区域之一，比 disclosure 三角区域稳定得多。
         """
-        if not index.isValid():
-            return False
-        if not self.model().hasChildren(index):
-            return False
-
-        # ✅ 用 TreeView 自己的 viewOptions，信息最全
         opt = self.viewOptions()
         opt.rect = self.visualRect(index)
 
-        # 子节点/展开状态会影响三角区域
-        opt.state |= QStyle.State_Children
-        if self.isExpanded(index):
-            opt.state |= QStyle.State_Open
+        text_rect = self.style().subElementRect(QStyle.SE_ItemViewItemText, opt, self.viewport())
 
-        # ✅ 关键：第三个参数必须是 viewport()
-        rect = self.style().subElementRect(QStyle.SE_TreeViewDisclosureItem, opt, self.viewport())
+        # 有些主题下 text_rect 可能非常靠左或宽度异常，这里加个兜底：
+        # 至少保证阈值不会小于行矩形 left
+        row_rect = opt.rect
+        return max(text_rect.left(), row_rect.left() + 4)
 
-        # 让命中区域更好点（避免用户点到三角旁边一点点就误判为文字）
-        rect = rect.adjusted(-6, 0, 10, 0)
-
-        return rect.contains(pos)
 
 
 
