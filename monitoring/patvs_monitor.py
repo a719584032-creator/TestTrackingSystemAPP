@@ -478,15 +478,35 @@ class Patvs_Fuction:
         with self.state_lock:
             self.case_start_time = datetime.datetime.now().isoformat()
 
-    def _bootstrap_event_progress( self, start_time, match_event: Callable[[object], bool]):
+    def _bootstrap_event_progress(
+        self,
+        start_time,
+        match_event: Callable[[object], bool],
+        *,
+        batch_window: float | None = None,
+        event_time_getter: Callable[[object], object] | None = None,
+    ):
         """
         监控之前先获取历史记录，返回最后一次的执行记录
         """
         normalized_start = self._normalize_start_time(start_time)
-        # 初始化统计记录，最新记录号，最新时间
+        # 初始化统计记录，并使用开始时间为基线
         count = 0
-        last_record_number = 0
-        last_event_time = None
+        next_start_time = normalized_start
+        try:
+            batch_window_value = (
+                max(0.0, float(batch_window)) if batch_window is not None else 0.0
+            )
+        except (TypeError, ValueError):
+            batch_window_value = 0.0
+
+        def _advance_start_time(current_time):
+            if batch_window_value <= 0:
+                return current_time
+            try:
+                return current_time + datetime.timedelta(seconds=batch_window_value)
+            except Exception:
+                return current_time
         handle = None
         flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
 
@@ -494,7 +514,7 @@ class Patvs_Fuction:
             handle = win32evtlog.OpenEventLog(None, "System")
         except Exception as exc:
             self.logger.warning(f"Failed to open event log for bootstrap scan: {exc}")
-            return normalized_start, 0, 0, normalized_start
+            return normalized_start, 0
 
         try:
             while True:
@@ -504,20 +524,20 @@ class Patvs_Fuction:
                 for event in events:
                     # 事件ID
                     if match_event(event):
-                        occurred_time = event.TimeGenerated
+                        if event_time_getter is None:
+                            occurred_time = getattr(event, "TimeGenerated", None)
+                        else:
+                            try:
+                                occurred_time = event_time_getter(event)
+                            except Exception:
+                                occurred_time = getattr(event, "TimeGenerated", None)
+                        if occurred_time is None:
+                            continue
                         # 开始时间之后
-                        if occurred_time > normalized_start:
-                            count += 1
-                            # 记录号，有些情况下可能没有 RecordNumber，因此做个兜底
-                            record_number = getattr(event, "RecordNumber", 0) or 0
-                            if record_number > last_record_number:
-                                last_record_number = record_number
-                            # 记录最新的事件时间（取最大值）
-                            if (
-                                last_event_time is None
-                                or occurred_time > last_event_time
-                            ):
-                                last_event_time = occurred_time
+                        if occurred_time <= next_start_time:
+                            continue
+                        count += 1
+                        next_start_time = _advance_start_time(occurred_time)
         except Exception as exc:
             self.logger.warning(f"Error scanning existing events: {exc}")
         finally:
@@ -528,11 +548,8 @@ class Patvs_Fuction:
                     self.logger.warning(
                         f"Error closing bootstrap event log: {close_exc}"
                     )
-        # 如果一个匹配事件都没找到，就把 last_event_time 设为起始时间
-        if last_event_time is None:
-            last_event_time = normalized_start
-        # 返回标准化后的起始时间、匹配到的事件总数、最大记录号、最后事件时间
-        return normalized_start, count, last_record_number, last_event_time
+        # 返回历史扫描后的下一次开始时间和计数
+        return next_start_time, count
 
 
     # ------------------------------------------------------------------

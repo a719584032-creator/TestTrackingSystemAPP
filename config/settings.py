@@ -10,7 +10,7 @@ from utils.instance_allocator import ensure_instance_paths
 
 
 APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 
 # 确保在加载配置前完成实例目录分配，避免多实例共享同一根目录
 ensure_instance_paths()
@@ -33,8 +33,8 @@ DEFAULT_MONITORING_ENCRYPTION_KEY = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4
 class ApiSettings:
     """API 设置"""
 
-    base_url: str = "https://patvs.lenovo.com/api"
-    #base_url: str = "http://10.184.46.54:5173/api"
+    #base_url: str = "https://patvs.lenovo.com/api"
+    base_url: str = "http://10.184.37.17:8888/api"
     #base_url: str = "http://172.28.79.247:5174/api"
 
     timeout: int = 100

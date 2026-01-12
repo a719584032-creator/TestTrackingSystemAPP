@@ -1,12 +1,28 @@
 """S4 睡眠事件监控。"""
 from __future__ import annotations
 
+import datetime
 import time
 from typing import TYPE_CHECKING
 
 import win32evtlog
 if TYPE_CHECKING:  # pragma: no cover
     from ..patvs_monitor import Patvs_Fuction
+
+DEFAULT_BATCH_WINDOW = 10.0
+
+
+def _advance_start_time(current_time):
+    if DEFAULT_BATCH_WINDOW <= 0:
+        return current_time
+    try:
+        return current_time + datetime.timedelta(seconds=DEFAULT_BATCH_WINDOW)
+    except Exception:
+        return current_time
+
+
+def _get_event_time(event):
+    return getattr(event, "TimeWritten", None) or getattr(event, "TimeGenerated", None)
 
 
 def run(
@@ -28,15 +44,12 @@ def run(
         context.action_complete.set()
         return
 
-    (
+    next_start_time, total = context._bootstrap_event_progress(
         start_time,
-        total,
-        last_record_number,
-        last_event_time,
-    ) = context._bootstrap_event_progress(
-        start_time, lambda event: event.EventID == 42
+        lambda event: event.EventID == 42,
+        batch_window=DEFAULT_BATCH_WINDOW,
+        event_time_getter=_get_event_time,
     )
-    last_seen_time = last_event_time
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s4")
 
@@ -89,24 +102,16 @@ def run(
 
             for event in events:
                 if event.EventID == 42:
-                    occurred_time = event.TimeGenerated
-                    record_number = getattr(event, "RecordNumber", 0) or 0
-                    if occurred_time <= start_time:
+                    occurred_time = _get_event_time(event)
+                    if occurred_time is None:
                         continue
-                    if record_number > last_record_number:
-                        last_record_number = record_number
-                        last_seen_time = occurred_time
-                        total += 1
-                        context._record_count_progress(
-                            target_cycles, total, action_key="s4"
-                        )
-                    elif record_number <= 0 or occurred_time > last_seen_time:
-                        last_record_number = record_number
-                        last_seen_time = occurred_time
-                        total += 1
-                        context._record_count_progress(
-                            target_cycles, total, action_key="s4"
-                        )
+                    if occurred_time <= next_start_time:
+                        continue
+                    total += 1
+                    next_start_time = _advance_start_time(occurred_time)
+                    context._record_count_progress(
+                        target_cycles, total, action_key="s4"
+                    )
 
             if total > log_num:
                 context.log(
