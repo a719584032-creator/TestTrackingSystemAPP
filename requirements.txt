@@ -1,4 +1,4 @@
-comtypes==1.2.1
+comtypes
 cryptography
 mutagen
 opencv-python
@@ -7,7 +7,8 @@ pycaw
 pyinstaller
 pynput
 PyQt5
-pywin32
 requests
 screen-brightness-control
 anyio
+psutil
+pywin32
