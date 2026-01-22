@@ -18,7 +18,7 @@ def run(context: "Patvs_Fuction", action_key: str, target_count: float, display_
     try:
         if action_key not in AUDIO_EVENT_KEYWORDS:
             context.log(
-                f"未在音频事件常量中找到 {display_action or action_key} 对应的关键字。"
+                f"未在音频事件常量中找到 {display_action or action_key} 对应的关键字。"                     
             )
             return
 

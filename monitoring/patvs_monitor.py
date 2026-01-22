@@ -616,6 +616,13 @@ class Patvs_Fuction:
             actions_snapshot = [dict(action) for action in self.remaining_actions]
             start_time = self.case_start_time
             case_id = self.case_id
+        for action in actions_snapshot:
+            name = action.get("name")
+            if not name:
+                continue
+            normalized = self.normalize_action(str(name))
+            if "时间" in str(name) or normalized == "time":
+                action.pop("remaining", None)
         session_completed = not actions_snapshot
         payload: dict[str, object] = {
             "case_id": case_id,
@@ -731,23 +738,30 @@ class Patvs_Fuction:
             with self.state_lock:
                 # 快照备份当前用例监控的动作
                 actions_snapshot = [dict(action) for action in self.remaining_actions]
-            for action_state in actions_snapshot:
+            for index, action_state in enumerate(actions_snapshot):
                 # 分解当前用例所需执行的动作和次数，并提示用户
                 action = action_state["name"]
                 target = action_state.get("target", 0)
                 remaining = action_state.get("remaining", target)
                 unit = action_state.get("unit", "count")
                 if unit == "seconds":
+                    normalized_action = self.normalize_action(action)
+                    is_time_action = "时间" in action or normalized_action == "time"
                     target_minutes = target / 60 if target else 0
-                    remaining_minutes = remaining / 60 if remaining else 0
-                    if remaining < target:
-                        self.log(
-                            f"您选择的动作是: {action}，剩余测试时间: {remaining_minutes:g} min / 总计 {target_minutes:g} min"
-                        )
-                    else:
+                    if is_time_action:
                         self.log(
                             f"您选择的动作是: {action}，目标测试时间: {target_minutes:g} min"
                         )
+                    else:
+                        remaining_minutes = remaining / 60 if remaining else 0
+                        if remaining < target:
+                            self.log(
+                                f"您选择的动作是: {action}，剩余测试时间: {remaining_minutes:g} min / 总计 {target_minutes:g} min"
+                            )
+                        else:
+                            self.log(
+                                f"您选择的动作是: {action}，目标测试时间: {target_minutes:g} min"
+                            )
                 else:
                     if remaining < target:
                         self.log(
@@ -786,13 +800,10 @@ class Patvs_Fuction:
                     # 根据关键字调起线程调对应的监控方法
                     if "时间" in normalized_action or normalized_action == "time":
                         total_minutes = target_value / 60 if target_value else 0
-                        remaining_minutes = remaining_value / 60 if remaining_value else 0
-                        self.log(
-                            f"开始执行监控时间，目标测试时间: {total_minutes:g} min，剩余 {remaining_minutes:g} min"
-                        )
+                        self.log(f"开始执行监控时间，目标测试时间: {total_minutes:g} min")
                         threading.Thread(
                             target=time_monitor.run,
-                            args=(self, remaining_value, target_value),
+                            args=(self, self.case_start_time, target_value),
                         ).start()
                     elif normalized_action == "电源插拔":
                         self.log(f"开始执行监控: {action}，目标测试次数: {target_value:g}")
