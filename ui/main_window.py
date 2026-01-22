@@ -683,11 +683,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_status.setWordWrap(True)
         audio_row.addWidget(self._audio_log_status, 1)
 
-        self._display_case_btn = QtWidgets.QPushButton("DisplayCase")
-        audio_row.addWidget(self._display_case_btn)
-
-        self._port_permutation_btn = QtWidgets.QPushButton("多口排列用例")
-        audio_row.addWidget(self._port_permutation_btn)
+        # Temporarily disabled per request.
+        # self._display_case_btn = QtWidgets.QPushButton("DisplayCase")
+        # audio_row.addWidget(self._display_case_btn)
+        # self._port_permutation_btn = QtWidgets.QPushButton("多口排列用例")
+        # audio_row.addWidget(self._port_permutation_btn)
 
         self._select_audio_logs_btn = QtWidgets.QPushButton("选择日志")
         self._clear_audio_logs_btn = QtWidgets.QPushButton("清除")
@@ -835,7 +835,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._directory_filter,
             self._result_filter,
             self._refresh_btn,
-            self._display_case_btn,
+            # self._display_case_btn,
             self._select_audio_logs_btn,
             self._clear_audio_logs_btn,
         ]
@@ -1146,9 +1146,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # 清除 audio 日志
         self._clear_audio_logs_btn.clicked.connect(self._clear_audio_logs)
         # DisplayCase
-        self._display_case_btn.clicked.connect(self._open_display_case_dialog)
+        # self._display_case_btn.clicked.connect(self._open_display_case_dialog)
         # 多口排列
-        self._port_permutation_btn.clicked.connect(self._open_port_permutation_dialog)
+        # self._port_permutation_btn.clicked.connect(self._open_port_permutation_dialog)
         # 结果按钮
         self._pass_btn.clicked.connect(lambda: self._submit_result("pass"))
         self._fail_btn.clicked.connect(lambda: self._submit_result("fail"))
@@ -1322,7 +1322,9 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     def _append_log(self, message: str) -> None:
         """ 追加日志信息 """
-        self._log_view.appendPlainText(message)
+        text = str(message)
+        self._log_view.appendPlainText(text)
+        self._logger.info(text)
 
     def _on_monitoring_finished(self) -> None:
         """ 监控完成，解禁pass按钮 """
