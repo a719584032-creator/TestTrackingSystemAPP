@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from monitoring.ladm import check_ladm_ready
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from models import (
@@ -23,27 +24,35 @@ from models import (
     Project,
     TestPlan,
 )
-from monitoring.audio_event_constants import AUDIO_EVENT_KEYWORDS
+from monitoring.displaycase_validator import validate_display_case_resolution
 from monitoring.manager import MonitoringManager
 from monitoring.nine_grid import (
     NineGridAction,
     build_nine_grid_actions,
     build_nine_grid_actions_from_session,
 )
+from monitoring.keyword_rules import (
+    filter_monitoring_actions,
+    requires_audio_logs,
+    requires_text_logs,
+)
 from monitoring.parser import (
     MonitoringAction,
-    crystaldiskmark_requirement,
-    mikelog_requirement,
     parse_keywords,
     recording_requirement_minutes,
-    require_attachment,
+    mikelog_requirement,
+    crystaldiskmark_requirement,
     transitioncaplog_requirement,
+    require_attachment,
+)
+from monitoring.result_rules import build_result_requirements
+from monitoring.result_validators import (
+    validate_crystaldiskmark_attachments,
+    validate_mikelog_attachments,
+    validate_recording_attachments,
+    validate_transitioncaplog_attachments,
 )
 from monitoring.session_store import SessionStateStore
-from monitoring.actions.crystaldiskmark_validator import read_peak_speeds
-from monitoring.actions.mikelog_validator import read_resume_counter_after_end_test
-from monitoring.actions.transitioncaplog_validator import read_loop_count_after_end
-from monitoring.actions.luyin import get_audio_duration_seconds
 from services.api_client import ApiClient, encode_attachment
 from services.ota import UpdateInfo
 from services.update_manager import UpdateManager
@@ -2326,37 +2335,6 @@ class MainWindow(QtWidgets.QMainWindow):
                         f"{action.label} -> {action.count:g}"
                     )
 
-    # ------------------------------------------------------------------
-    def _requires_audio_logs(self) -> bool:
-        # 判断是否有 audio 动作
-        for action in self._current_actions:
-            if action.normalized_name in AUDIO_EVENT_KEYWORDS:
-                return True
-        return False
-
-    # ------------------------------------------------------------------
-    def _requires_text_logs(self) ->list:
-
-        for action in self._current_actions:
-            normalized = action.normalized_name
-            if self._is_mikelog_action(action) or self._is_transitioncap_action(action):
-                continue
-            if 'log' in normalized:
-                return [True, normalized]
-        return [False,'None']
-
-    def _is_recording_action(self, action: MonitoringAction) -> bool:
-        return action.normalized_name == "录音"
-
-    def _is_mikelog_action(self, action: MonitoringAction) -> bool:
-        return action.normalized_name == "mikelog"
-
-    def _is_crystaldiskmark_action(self, action: MonitoringAction) -> bool:
-        return action.normalized_name == "crystaldiskmark"
-
-    def _is_transitioncap_action(self, action: MonitoringAction) -> bool:
-        return action.normalized_name == "transitioncaplog"
-
     def _case_has_nine_grid_keyword(self, case: Optional[PlanCase]) -> bool:
         if not case:
             return False
@@ -2371,6 +2349,25 @@ class MainWindow(QtWidgets.QMainWindow):
         for token in case.keyword_tokens():
             if self._normalize_token(str(token)) == "display":
                 return True
+        return False
+
+    def _case_has_ladm_keyword(self, case: Optional[PlanCase]) -> bool:
+        if not case:
+            return False
+        for token in case.keyword_tokens():
+            normalized = self._normalize_token(str(token))
+            if normalized == "ladm":
+                return True
+            parts = [part for part in normalized.split("+") if part]
+            if parts and parts[0] == "ladm":
+                return True
+        return False
+
+    def _ensure_ladm_ready(self, context: str) -> bool:
+        ready, message = check_ladm_ready()
+        if ready:
+            return True
+        QtWidgets.QMessageBox.warning(self, "LADM 检查失败", f"{context}失败：{message}")
         return False
 
     def _display_keyword_actions(self) -> List[MonitoringAction]:
@@ -2413,252 +2410,12 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         ]
 
-    def _display_case_payload(self, case: PlanCase) -> Optional[Dict[str, str]]:
-        if not case.steps:
-            return None
-        target_step = None
-        for step in case.steps:
-            if step.no is not None and str(step.no).strip() == "2":
-                target_step = step
-                break
-        if not target_step or not target_step.action:
-            return None
-        try:
-            payload = json.loads(target_step.action)
-        except (TypeError, ValueError) as exc:
-            self._logger.warning("DisplayCase action 解析失败: %s", exc)
-            return None
-        if not isinstance(payload, dict):
-            return None
-        return payload
-
-    def _get_connected_display_resolutions(self, include_primary: bool) -> List[str]:
-        """
-        获取当前 Windows 系统中已连接显示器的分辨率信息。
-
-        :param include_primary: 是否包含主显示器
-                                True  -> 返回所有显示器（包含主屏）
-                                False -> 仅返回非主显示器
-        :return: 分辨率字符串列表，格式为 ["1920*1080*60", "3840*2160*144"]
-        """
-
-        # 尝试加载 Windows 显示器相关依赖（pywin32）
-        try:
-            import win32api
-            import win32con
-        except Exception as exc:
-            # 如果运行环境不是 Windows 或缺少依赖，直接返回空列表
-            self._logger.warning("无法加载显示器检测依赖: %s", exc)
-            return []
-
-        # 用于保存所有检测到的显示器信息
-        monitors: List[Dict[str, object]] = []
-
-        # 枚举系统中所有已连接的显示器
-        # EnumDisplayMonitors 返回 (monitor_handle, hdc, rect)
-        for monitor_handle, _, _ in win32api.EnumDisplayMonitors():
-            # 获取显示器的详细信息（设备名、区域、标志位等）
-            info = win32api.GetMonitorInfo(monitor_handle)
-
-            # 获取显示设备名称（如 \\.\DISPLAY1）
-            device = info.get("Device")
-            if not device:
-                continue
-
-            try:
-                # 读取该显示器当前使用的显示模式（分辨率、刷新率等）
-                settings = win32api.EnumDisplaySettings(
-                    device, win32con.ENUM_CURRENT_SETTINGS
-                )
-            except Exception as exc:
-                # 个别显示器读取失败时不影响整体流程
-                self._logger.warning("读取显示器配置失败(%s): %s", device, exc)
-                continue
-
-            # 分辨率宽高（像素）
-            width = getattr(settings, "PelsWidth", None)
-            height = getattr(settings, "PelsHeight", None)
-
-            # 刷新率（Hz），部分设备可能返回 None
-            freq = getattr(settings, "DisplayFrequency", None)
-
-            # 宽高无效则跳过
-            if not width or not height:
-                continue
-
-            # 统一格式化为 "宽*高*刷新率"
-            # 若刷新率为空，则使用 0 占位
-            resolution = f"{int(width)}*{int(height)}*{int(freq or 0)}"
-
-            # 判断该显示器是否为主显示器
-            is_primary = bool(
-                info.get("Flags", 0) & win32con.MONITORINFOF_PRIMARY
-            )
-
-            # 保存当前显示器的信息
-            monitors.append(
-                {
-                    "resolution": resolution,
-                    "is_primary": is_primary,
-                }
-            )
-
-        # 如果没有检测到任何显示器，返回空列表
-        if not monitors:
-            return []
-
-        # 根据参数决定是否包含主显示器
-        if include_primary:
-            selected = monitors
-        else:
-            selected = [
-                item for item in monitors if not item.get("is_primary")
-            ]
-
-        # 返回分辨率字符串列表
-        return [str(item.get("resolution"))  for item in selected if item.get("resolution")]
-
     def _validate_display_case_resolution(self, case: PlanCase) -> bool:
-        """
-        校验当前系统显示器环境是否符合 DisplayCase 用例的要求。
-
-        校验内容包括：
-        1. 显示器数量是否符合预期
-        2. 当前显示器分辨率是否与用例中定义的分辨率一致
-        3. 是否需要包含主显示器参与校验
-
-        :param case: 测试计划中的显示器相关用例
-        :return: 校验通过返回 True，否则返回 False
-        """
-
-        # =========================
-        # 1. 解析用例中的显示器配置
-        # =========================
-        payload = self._display_case_payload(case)
-        if not payload:
-            # 用例无法解析出显示器相关字段，直接提示用户
-            QtWidgets.QMessageBox.warning(
-                self,
-                "用例解析失败",
-                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
-            )
-            return False
-
-        # =========================
-        # 2. 校验期望的显示器数量
-        # =========================
-        monitor_qty_raw = payload.get("monitor_qty")
-
-        # 尝试将显示器数量解析为整数
-        try:
-            expected_qty = int(str(monitor_qty_raw).strip())
-        except (TypeError, ValueError):
-            expected_qty = -1
-
-        # 数量非法则视为用例无效
-        if expected_qty <= 0:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "用例解析失败",
-                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
-            )
-            return False
-
-        # =========================
-        # 3. 提取用例中定义的期望分辨率列表
-        # =========================
-        resolution_fields = (
-            "tbt_monitor",  # Thunderbolt 显示器
-            "type_c_monitor",  # Type-C 显示器
-            "dp1_monitor",  # DP 接口 1
-            "dp2_monitor",  # DP 接口 2
-            "hdmi1_monitor",  # HDMI 接口 1
-            "hdmi2_monitor",  # HDMI 接口 2
-        )
-
-        expected_resolutions = []
-
-        # 遍历各接口字段，收集期望分辨率
-        for field in resolution_fields:
-            value = payload.get(field)
-            if value is None:
-                continue
-
-            text = str(value).strip()
-            if text:
-                # 分辨率格式通常为 "3840*2160*60"
-                expected_resolutions.append(text)
-
-        # 如果没有解析出任何期望分辨率，视为用例不合法
-        if not expected_resolutions:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "用例解析失败",
-                "当前用例解析出错，请使用 DisplayCase 自动生成的用例。",
-            )
-            return False
-
-        # =========================
-        # 4. 获取当前系统实际显示器分辨率
-        # =========================
-        # 判断是否需要将主显示器也纳入校验范围
-        include_primary = self._display_case_include_primary(payload)
-
-        # 获取当前系统检测到的显示器分辨率列表
-        actual_resolutions = self._get_connected_display_resolutions(include_primary)
-
-        # 根据是否包含主显示器，生成提示文案
-        qty_label = "期望显示器数量" if include_primary else "期望外接显示器数量"
-
-        # =========================
-        # 5. 校验显示器数量是否匹配
-        # =========================
-        if len(actual_resolutions) != expected_qty:
-            message = (
-                "请连接正确的显示器和分辨率。\n"
-                f"{qty_label}: {expected_qty}\n"
-                f"当前检测数量: {len(actual_resolutions)}\n"
-                f"期望分辨率: {', '.join(expected_resolutions)}\n"
-                f"当前分辨率: {', '.join(actual_resolutions) or '未检测到'}"
-            )
-            QtWidgets.QMessageBox.warning(self, "显示器数量不匹配", message)
-            return False
-
-        # =========================
-        # 6. 校验显示器分辨率是否匹配
-        # =========================
-        # 找出当前显示器中未包含在期望分辨率列表中的项
-        missing = [
-            item for item in actual_resolutions
-            if item not in expected_resolutions
-        ]
-
-        if missing:
-            message = (
-                "请连接正确的显示器和分辨率。\n"
-                f"期望分辨率: {', '.join(expected_resolutions)}\n"
-                f"当前分辨率: {', '.join(actual_resolutions)}\n"
-                f"未匹配分辨率: {', '.join(missing)}"
-            )
-            QtWidgets.QMessageBox.warning(self, "显示器分辨率不匹配", message)
-            return False
-
-        # =========================
-        # 7. 校验通过
-        # =========================
-        return True
-
-    def _display_case_include_primary(self, payload: Dict[str, str]) -> bool:
-        """ 是否包含主显示器 """
-        lcd_state = payload.get("lcd_off_on")
-        if lcd_state is None:
+        result = validate_display_case_resolution(case.steps)
+        if result.ok:
             return True
-        normalized = self._normalize_token(str(lcd_state))
-        if normalized == "off":
-            return False
-        if normalized == "on":
-            return True
-        return True
+        QtWidgets.QMessageBox.warning(self, result.title, result.message)
+        return False
 
     def _load_nine_grid_actions(self) -> List[NineGridAction]:
         detail = self._plan_detail
@@ -2738,20 +2495,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._current_case and self._case_has_display_keyword(self._current_case):
                 if not self._validate_display_case_resolution(self._current_case):
                     return
-            monitoring_actions = [
-                action
-                for action in self._current_actions
-                if not self._is_recording_action(action)
-                and not self._is_mikelog_action(action)
-                and not self._is_crystaldiskmark_action(action)
-                and not self._is_transitioncap_action(action)
-            ]
+            if self._current_case and self._case_has_ladm_keyword(self._current_case):
+                if not self._ensure_ladm_ready("开始执行"):
+                    return
+            monitoring_actions = filter_monitoring_actions(self._current_actions)
             if self._current_case and self._case_has_display_keyword(self._current_case):
                 monitoring_actions.extend(self._display_keyword_actions())
             start_time = dt.datetime.now(dt.timezone.utc).isoformat()
             if self._current_case and self._current_case.id:
                 self._case_execution_start_times[int(self._current_case.id)] = start_time
-            require_audio_logs = self._requires_audio_logs()
+            require_audio_logs = requires_audio_logs(self._current_actions)
             if require_audio_logs and not self._audio_log_files:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -2759,7 +2512,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     "该用例包含 Lab Audio 监控，请先选择至少一个串口日志文件。",
                 )
                 return
-            require_text_logs,log_name = self._requires_text_logs()
+            require_text_logs, log_name = requires_text_logs(self._current_actions)
             if require_text_logs and not self._audio_log_files:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -2842,166 +2595,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 hint_text = f"{entry.device_label}"
         return device_model_id, plan_device_model_id, hint_text
 
-    def _validate_recording_attachments(
-        self,
-        attachments: Sequence[Dict[str, str]],
-        required_minutes: Optional[float],
-    ) -> bool:
-        """确保至少有一个录音附件满足时长要求。"""
-
-        if required_minutes is None or required_minutes <= 0:
-            return True
-        if not attachments:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "缺少录音",
-                f"提交通过需要上传时长不少于 {required_minutes:g} 分钟的录音文件。",
-            )
-            return False
-
-        required_seconds = required_minutes * 60
-        errors: List[str] = []
-        for payload in attachments:
-            path = payload.get("local_path")
-            if not path:
-                continue
-            try:
-                duration = get_audio_duration_seconds(path)
-            except ValueError as exc:
-                errors.append(f"{os.path.basename(path)}: {exc}")
-                continue
-            if duration >= required_seconds:
-                return True
-            errors.append(
-                f"{os.path.basename(path)} 时长 {duration / 60:.1f} 分钟，不足 {required_minutes:g} 分钟"
-            )
-
-        message = "\n".join(errors) if errors else "请上传可识别的录音文件。"
-        QtWidgets.QMessageBox.warning(self, "录音不符合要求", message)
-        return False
-
-    def _validate_mikelog_attachments(
-        self,
-        attachments: Sequence[Dict[str, str]],
-        required_count: float,
-    ) -> bool:
-        """校验上传的 Mike 日志是否满足 Resume counter 要求。"""
-
-        if required_count <= 0:
-            return True
-        log_paths: List[str] = []
-        for payload in attachments:
-            path = payload.get("local_path")
-            if path:
-                log_paths.append(path)
-        if not log_paths:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "缺少 Mike 日志",
-                f"提交通过需要上传 Mike 日志，Resume counter (Total) 需达到 {required_count:g}。",
-            )
-            return False
-
-        errors: List[str] = []
-        for path in log_paths:
-            try:
-                resume_count = read_resume_counter_after_end_test(path)
-            except ValueError as exc:
-                errors.append(f"{os.path.basename(path)}: {exc}")
-                continue
-            if resume_count < required_count:
-                errors.append(
-                    f"{os.path.basename(path)} Resume counter (Total) = {resume_count}, 低于要求的 {required_count:g}"
-                )
-
-        if errors:
-            message = "\n".join(errors)
-            QtWidgets.QMessageBox.warning(self, "Mike 日志不符合要求", message)
-            return False
-        return True
-
-    def _validate_crystaldiskmark_attachments(
-        self,
-        attachments: Sequence[Dict[str, str]],
-        required_speed: float,
-    ) -> bool:
-        """校验上传的 CrystalDiskMark 日志是否满足读写速率要求。"""
-
-        if required_speed <= 0:
-            return True
-        log_paths: List[str] = []
-        for payload in attachments:
-            path = payload.get("local_path")
-            if path:
-                log_paths.append(path)
-        if not log_paths:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "缺少 CrystalDiskMark 日志",
-                f"提交通过需要上传 CrystalDiskMark 日志，读写速率需达到 {required_speed:g} MB/s。",
-            )
-            return False
-
-        errors: List[str] = []
-        for path in log_paths:
-            try:
-                read_speed, write_speed = read_peak_speeds(path)
-            except ValueError as exc:
-                errors.append(f"{os.path.basename(path)}: {exc}")
-                continue
-            # 需分别在 [Read] 与 [Write] 段找到大于阈值的速率
-            if read_speed <= required_speed or write_speed <= required_speed:
-                errors.append(
-                    f"{os.path.basename(path)} 读 {read_speed:.3f} MB/s，写 {write_speed:.3f} MB/s，"
-                    f"未超过要求的 {required_speed:g} MB/s"
-                )
-
-        if errors:
-            message = "\n".join(errors)
-            QtWidgets.QMessageBox.warning(self, "CrystalDiskMark 日志不符合要求", message)
-            return False
-        return True
-
-    def _validate_transitioncaplog_attachments(
-        self,
-        attachments: Sequence[Dict[str, str]],
-        required_count: float,
-    ) -> bool:
-        """校验上传的 TransitionCap 日志是否满足 loop count 要求。"""
-
-        if required_count <= 0:
-            return True
-        log_paths: List[str] = []
-        for payload in attachments:
-            path = payload.get("local_path")
-            if path:
-                log_paths.append(path)
-        if not log_paths:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "缺少 TransitionCap 日志",
-                f"提交通过需要上传 TransitionCap 日志，loop count 需达到 {required_count:g}。",
-            )
-            return False
-
-        errors: List[str] = []
-        for path in log_paths:
-            try:
-                loop_count = read_loop_count_after_end(path)
-            except ValueError as exc:
-                errors.append(f"{os.path.basename(path)}: {exc}")
-                continue
-            if loop_count < required_count:
-                errors.append(
-                    f"{os.path.basename(path)} loop count = {loop_count}, 低于要求的 {required_count:g}"
-                )
-
-        if errors:
-            message = "\n".join(errors)
-            QtWidgets.QMessageBox.warning(self, "TransitionCap 日志不符合要求", message)
-            return False
-        return True
-
     def _submit_result(self, result: str) -> None:
         """ 更新结果 """
         if not self._current_case:
@@ -3017,40 +2610,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 "监控尚未完成，暂不能标记通过。",
             )
             return
+        if result == "pass" and self._current_case and self._case_has_ladm_keyword(self._current_case):
+            if not self._ensure_ladm_ready("提交结果"):
+                return
         try:
             actions = parse_keywords(self._current_case.keyword_actions())
         except ValidationError as exc:
             QtWidgets.QMessageBox.warning(self, "关键字错误", str(exc))
             return
-        recording_minutes = recording_requirement_minutes(actions)
-        recording_required_for_result = (
-            result == "pass" and recording_minutes is not None and recording_minutes > 0
-        )
-        mikelog_required_count = mikelog_requirement(actions)
-        mikelog_required_for_result = (
-            result == "pass"
-            and mikelog_required_count is not None
-            and mikelog_required_count > 0
-        )
-        crystaldiskmark_required_speed = crystaldiskmark_requirement(actions)
-        crystaldiskmark_required_for_result = (
-            result == "pass"
-            and crystaldiskmark_required_speed is not None
-            and crystaldiskmark_required_speed > 0
-        )
-        transitioncap_required_count = transitioncaplog_requirement(actions)
-        transitioncap_required_for_result = (
-            result == "pass"
-            and transitioncap_required_count is not None
-            and transitioncap_required_count > 0
-        )
-        need_attachment = (
-            (result in {"pass", "fail"} and require_attachment(actions))
-            or recording_required_for_result
-            or mikelog_required_for_result
-            or crystaldiskmark_required_for_result
-            or transitioncap_required_for_result
-        )
+        requirements = build_result_requirements(actions, result)
         device_model_id, plan_device_model_id, device_hint = self._resolve_submission_device(
             self._current_entry
         )
@@ -3059,15 +2627,11 @@ class MainWindow(QtWidgets.QMainWindow):
             {"pass": "通过", "fail": "失败", "blocked": "阻塞"}.get(result, result.upper()),
             self._case_display_text(self._current_entry),
             device_hint,
-            need_attachment,
-            recording_requirement=recording_minutes if recording_required_for_result else None,
-            mikelog_requirement=float(mikelog_required_count) if mikelog_required_for_result else None,
-            crystaldiskmark_requirement=float(crystaldiskmark_required_speed)
-            if crystaldiskmark_required_for_result
-            else None,
-            transitioncap_requirement=float(transitioncap_required_count)
-            if transitioncap_required_for_result
-            else None,
+            requirements.need_attachment,
+            recording_requirement=requirements.recording_minutes,
+            mikelog_requirement=requirements.mikelog_count,
+            crystaldiskmark_requirement=requirements.crystaldiskmark_speed,
+            transitioncap_requirement=requirements.transitioncap_count,
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -3081,23 +2645,33 @@ class MainWindow(QtWidgets.QMainWindow):
         failure_reason = dialog.failure_reason()
         bug_ref = dialog.bug_ref()
         attachments_with_local = dialog.attachments()
-        if recording_required_for_result:
-            if not self._validate_recording_attachments(attachments_with_local, recording_minutes):
+        if requirements.recording_minutes is not None:
+            result_check = validate_recording_attachments(
+                attachments_with_local, requirements.recording_minutes
+            )
+            if not result_check.ok:
+                QtWidgets.QMessageBox.warning(self, result_check.title, result_check.message)
                 return
-        if mikelog_required_for_result:
-            if not self._validate_mikelog_attachments(
-                attachments_with_local, float(mikelog_required_count)
-            ):
+        if requirements.mikelog_count is not None:
+            result_check = validate_mikelog_attachments(
+                attachments_with_local, requirements.mikelog_count
+            )
+            if not result_check.ok:
+                QtWidgets.QMessageBox.warning(self, result_check.title, result_check.message)
                 return
-        if crystaldiskmark_required_for_result:
-            if not self._validate_crystaldiskmark_attachments(
-                attachments_with_local, float(crystaldiskmark_required_speed)
-            ):
+        if requirements.crystaldiskmark_speed is not None:
+            result_check = validate_crystaldiskmark_attachments(
+                attachments_with_local, requirements.crystaldiskmark_speed
+            )
+            if not result_check.ok:
+                QtWidgets.QMessageBox.warning(self, result_check.title, result_check.message)
                 return
-        if transitioncap_required_for_result:
-            if not self._validate_transitioncaplog_attachments(
-                attachments_with_local, float(transitioncap_required_count)
-            ):
+        if requirements.transitioncap_count is not None:
+            result_check = validate_transitioncaplog_attachments(
+                attachments_with_local, requirements.transitioncap_count
+            )
+            if not result_check.ok:
+                QtWidgets.QMessageBox.warning(self, result_check.title, result_check.message)
                 return
         attachments = [
             {k: v for k, v in payload.items() if k != "local_path"}

@@ -50,6 +50,8 @@ def run(
         batch_window=DEFAULT_BATCH_WINDOW,
         event_time_getter=_get_event_time,
     )
+    if total:
+        context.record_next_action_start_time(next_start_time)
     log_num = total
     context._record_count_progress(target_cycles, total, action_key="s4")
 
@@ -109,6 +111,7 @@ def run(
                         continue
                     total += 1
                     next_start_time = _advance_start_time(occurred_time)
+                    context.record_next_action_start_time(next_start_time)
                     context._record_count_progress(
                         target_cycles, total, action_key="s4"
                     )

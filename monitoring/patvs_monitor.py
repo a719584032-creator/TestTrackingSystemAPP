@@ -80,6 +80,7 @@ class Patvs_Fuction:
         self.audio_log_offsets: dict[str, int] = {}
         self.audio_event_cache: dict[str, int] = {}
         self.case_start_time: str | None = None
+        self._next_action_start_time: datetime.datetime | None = None
         # 线程锁，保护状态字段的并发访问
         self.state_lock = threading.Lock()
         self.session_reset_requested = False
@@ -476,7 +477,25 @@ class Patvs_Fuction:
     def _refresh_case_start_time(self) -> None:
         """动作完成后刷新开始时间，避免复用旧事件。"""
         with self.state_lock:
-            self.case_start_time = datetime.datetime.now().isoformat()
+            if self._next_action_start_time is not None:
+                self.case_start_time = self._next_action_start_time.isoformat()
+                self._next_action_start_time = None
+            else:
+                self.case_start_time = datetime.datetime.now().isoformat()
+
+    def record_next_action_start_time(self, next_start_time: object) -> None:
+        """记录下一动作的起始时间（通常为事件时间 + batch window）。"""
+        try:
+            normalized = self._normalize_start_time(next_start_time)
+        except Exception:
+            normalized = datetime.datetime.now()
+        with self.state_lock:
+            # 如果下一次时间为空/新的时间更晚 就更新下次时间
+            if (
+                self._next_action_start_time is None
+                or normalized > self._next_action_start_time
+            ):
+                self._next_action_start_time = normalized
 
     def _bootstrap_event_progress(
         self,

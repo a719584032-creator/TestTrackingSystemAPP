@@ -29,7 +29,7 @@ DEFAULT_CLASS_GUIDS: Tuple[str, ...] = (
     # GUID_DEVINTERFACE_HID,
     GUID_DEVINTERFACE_NET,
 )
-DEFAULT_BATCH_WINDOW = 1.5
+DEFAULT_BATCH_WINDOW = 3
 
 
 def _normalize_key(value) -> str:
@@ -169,21 +169,22 @@ class InterfaceNotification:
                 merged = True
             self._last_removal_time = now
             if merged:
-                self.context.log(
+                logger.debug(
                     f"检测到 {self.action_label}移除: {device_name}，已合并为同一次插拔"
                 )
             else:
                 self.cycles_count += 1
-                self.context.log(
+                logger.debug(
                     f"检测到 {self.action_label}移除: {device_name}，当前插拔次数: {self.cycles_count}"
                 )
+                self.context.log(f"当前插拔次数: {self.cycles_count}")
                 self.context.record_count_progress_if_current(
                     self.target_cycles,
                     self.cycles_count,
                     expected_keys=self.expected_keys,
                 )
         elif wparam == win32con.DBT_DEVICEARRIVAL and self.log_arrival:
-            self.context.log(f"检测到 {self.action_label}接入: {device_name}")
+            logger.debug(f"检测到 {self.action_label}接入: {device_name}")
 
         # 达到目标次数，记录进度并退出消息循环
         if self.target_cycles and self.cycles_count >= self.target_cycles:
