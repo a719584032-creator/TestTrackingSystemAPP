@@ -14,6 +14,8 @@ import time
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BATCH_WINDOW = 3.0
+
 
 class _WxCompat:
     @staticmethod
@@ -27,7 +29,7 @@ import uuid
 GUID_DEVINTERFACE_USB_DEVICE = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 
 class Notification:
-    def __init__(self, context, cycles_count, target_cycles):
+    def __init__(self, context, cycles_count, target_cycles, batch_window: float | None = None):
         self.context = context
         try:
             self.cycles_count = int(float(cycles_count))
@@ -41,6 +43,15 @@ class Notification:
         self.hwnd = None
         self.hdn = None
         self.class_name = f"DeviceChange_WindowClass_{uuid.uuid4()}"
+        try:
+            self.batch_window = (
+                max(0.0, float(batch_window))
+                if batch_window is not None
+                else float(DEFAULT_BATCH_WINDOW)
+            )
+        except (TypeError, ValueError):
+            self.batch_window = float(DEFAULT_BATCH_WINDOW)
+        self._last_removal_time = None
         self.init_notification_window()
         logger.info(
             "Initialized Notification with cycles_count: %s, target_cycles: %s",
@@ -80,15 +91,24 @@ class Notification:
     def onDeviceChange(self, hwnd, message, wparam, lparam):
         dbch = win32gui_struct.UnpackDEV_BROADCAST(lparam)
         if wparam == win32con.DBT_DEVICEREMOVECOMPLETE:
-            self.cycles_count += 1
-            self.context.log(
-                f"检测到 USB 设备移除: {dbch.name}，当前插拔次数: {self.cycles_count}"
-            )
-            self.context.record_count_progress_if_current(
-                self.target_cycles,
-                self.cycles_count,
-                expected_keys={"usb插拔", "s3插拔"},
-            )
+            now = time.monotonic()
+            if (
+                self.batch_window
+                and self._last_removal_time is not None
+                and now - self._last_removal_time < self.batch_window
+            ):
+                logger.debug("USB 插拔事件在短时间内重复触发，已合并计数。")
+            else:
+                self.cycles_count += 1
+                self.context.log(
+                    f"检测到 USB 设备移除: {dbch.name}，当前插拔次数: {self.cycles_count}"
+                )
+                self.context.record_count_progress_if_current(
+                    self.target_cycles,
+                    self.cycles_count,
+                    expected_keys={"usb插拔", "s3插拔"},
+                )
+            self._last_removal_time = now
         elif wparam == win32con.DBT_DEVICEARRIVAL:
             pass
             # 可在此输出调试日志，例如记录设备名与累计插拔次数
