@@ -9,8 +9,8 @@ from .paths import get_patvs_root
 from utils.instance_allocator import ensure_instance_paths
 
 
-APP_NAME = "Test Tracking System"
-APP_VERSION = "2.0.7"
+APP_NAME = "feiyan"
+APP_VERSION = "1.0.0"
 
 # 确保在加载配置前完成实例目录分配，避免多实例共享同一根目录
 ensure_instance_paths()

@@ -72,7 +72,7 @@ class MonitoringManager(QtCore.QObject):
 
     def start(
         self,
-        case_id: int,
+        case_id: str,
         actions: Sequence[MonitoringAction],
         start_time: str,
         *,

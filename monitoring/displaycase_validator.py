@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -17,24 +18,47 @@ class DisplayCaseValidationResult:
     message: str = ""
 
 
-def parse_display_case_payload(steps: list[object] | None) -> Optional[Dict[str, str]]:
-    if not steps:
+def _extract_payload_from_text(text: str) -> Optional[Dict[str, str]]:
+    if not text:
         return None
-    target_step = None
-    for step in steps:
-        if getattr(step, "no", None) is not None and str(step.no).strip() == "2":
-            target_step = step
-            break
-    if not target_step or not getattr(target_step, "action", None):
+    match = re.search(r"\{.*?\}", text, re.DOTALL)
+    if not match:
         return None
     try:
-        payload = json.loads(target_step.action)
+        payload = json.loads(match.group(0))
     except (TypeError, ValueError) as exc:
-        logger.warning("DisplayCase action 解析失败: %s", exc)
+        logger.warning("DisplayCase action parse failed: %s", exc)
         return None
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def parse_display_case_payload(steps: list[object] | str | None) -> Optional[Dict[str, str]]:
+    if not steps:
+        return None
+    if isinstance(steps, str):
+        return _extract_payload_from_text(steps)
+
+    target_text: Optional[str] = None
+    fallback_texts: List[str] = []
+    for step in steps:
+        action = getattr(step, "action", None)
+        if action:
+            fallback_texts.append(str(action))
+        if getattr(step, "no", None) is not None and str(step.no).strip() == "2":
+            target_text = str(action) if action else None
+            break
+
+    if target_text:
+        payload = _extract_payload_from_text(target_text)
+        if payload:
+            return payload
+    for text in fallback_texts:
+        payload = _extract_payload_from_text(text)
+        if payload:
+            return payload
+    return None
 
 
 def display_case_include_primary(payload: Dict[str, str]) -> bool:
@@ -95,7 +119,7 @@ def get_connected_display_resolutions(include_primary: bool) -> List[str]:
     return [str(item.get("resolution")) for item in selected if item.get("resolution")]
 
 
-def validate_display_case_resolution(steps: list[object] | None) -> DisplayCaseValidationResult:
+def validate_display_case_resolution(steps: list[object] | str | None) -> DisplayCaseValidationResult:
     payload = parse_display_case_payload(steps)
     if not payload:
         return DisplayCaseValidationResult(

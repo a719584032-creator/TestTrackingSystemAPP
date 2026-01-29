@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 class Department:
     """获取部门信息"""
 
-    id: int
+    id: Optional[str]
     name: str
     active: bool = True
     code: Optional[str] = None
@@ -18,12 +18,13 @@ class Department:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Department":
+        raw_id = payload.get("department_id")
         return cls(
-            id=payload.get("id"),
-            name=payload.get("name", ""),
-            active=payload.get("active", True),
-            code=payload.get("code"),
-            description=payload.get("description"),
+            id=str(raw_id) if raw_id is not None else None,
+            name=str(payload.get("department_name") or ""),
+            active=True,
+            code=None,
+            description=None,
         )
 
 
@@ -31,18 +32,22 @@ class Department:
 class Project:
     """获取部门项目信息"""
 
-    id: int
+    id: Optional[str]
     name: str
-    department_id: int
-    status: str
+    department_id: Optional[str]
+    department_name: Optional[str] = None
+    status: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Project":
+        raw_id = payload.get("project_id")
+        raw_department_id = payload.get("department_id")
         return cls(
-            id=payload.get("id"),
-            name=payload.get("name", ""),
-            department_id=payload.get("department_id"),
-            status=payload.get("status", "unknown"),
+            id=str(raw_id) if raw_id is not None else None,
+            name=str(payload.get("project_name") or ""),
+            department_id=str(raw_department_id) if raw_department_id is not None else None,
+            department_name=payload.get("department_name"),
+            status=payload.get("status"),
         )
 
 
@@ -72,20 +77,47 @@ class DeviceModel:
 class TestPlan:
     """获取测试计划"""
 
-    id: int
+    id: Optional[str]
     name: str
-    project_id: int
-    department_id: int
+    project_id: Optional[str]
+    department_id: Optional[str]
     status: Optional[str]
+    department_name: Optional[str] = None
+    project_name: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    passed: Optional[int] = None
+    failed: Optional[int] = None
+    blocked: Optional[int] = None
+    not_run: Optional[int] = None
+    total: Optional[int] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    tester_names: Optional[str] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "TestPlan":
+        raw_id = payload.get("plan_id")
+        raw_project_id = payload.get("project_id")
+        raw_department_id = payload.get("department_id")
         return cls(
-            id=payload.get("id"),
-            name=payload.get("name", ""),
-            project_id=payload.get("project_id"),
-            department_id=payload.get("department_id"),
+            id=str(raw_id) if raw_id is not None else None,
+            name=str(payload.get("name") or ""),
+            project_id=str(raw_project_id) if raw_project_id is not None else None,
+            department_id=str(raw_department_id) if raw_department_id is not None else None,
             status=payload.get("status"),
+            department_name=payload.get("department_name"),
+            project_name=payload.get("project_name"),
+            start_time=payload.get("start_time"),
+            end_time=payload.get("end_time"),
+            passed=payload.get("passed"),
+            failed=payload.get("failed"),
+            blocked=payload.get("blocked"),
+            not_run=payload.get("not_run"),
+            total=payload.get("total"),
+            created_at=payload.get("created_at"),
+            updated_at=payload.get("updated_at"),
+            tester_names=payload.get("tester_names"),
         )
 
 
@@ -146,7 +178,7 @@ class PlanStatistics:
 class PlanTester:
     """测试计划测试人员"""
 
-    id: int
+    id: Optional[str]
     name: str
     username: Optional[str] = None
 
@@ -187,7 +219,7 @@ class PlanExecutionRun:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanExecutionRun":
         return cls(
-            id=payload.get("id"),
+            id=str(payload.get("id")) if payload.get("id") is not None else None,
             name=payload.get("name", ""),
             status=payload.get("status"),
             run_type=payload.get("run_type"),
@@ -200,6 +232,22 @@ class PlanExecutionRun:
             not_run=payload.get("not_run", 0),
             start_time=payload.get("start_time"),
             end_time=payload.get("end_time"),
+        )
+
+
+@dataclass(slots=True)
+class PlanDevice:
+    """测试计划设备"""
+
+    id: Optional[str]
+    name: str
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "PlanDevice":
+        raw_id = payload.get("device_id")
+        return cls(
+            id=str(raw_id) if raw_id is not None else None,
+            name=str(payload.get("device_name") or ""),
         )
 
 
@@ -217,6 +265,7 @@ class PlanDetail:
     status: Optional[str]
     testers: List[PlanTester] = field(default_factory=list)
     device_models: List[DeviceModel] = field(default_factory=list)
+    devices: List[PlanDevice] = field(default_factory=list)
     statistics: Optional[PlanStatistics] = None
     execution_runs: List[PlanExecutionRun] = field(default_factory=list)
     dock_nine_gird: Dict[str, float] = field(default_factory=dict)
@@ -235,6 +284,7 @@ class PlanDetail:
             status=payload.get("status"),
             testers=[PlanTester.from_dict(item) for item in payload.get("testers", [])],
             device_models=[DeviceModel.from_dict(item) for item in payload.get("device_models", [])],
+            devices=[PlanDevice.from_dict(item) for item in payload.get("devices", [])],
             statistics=PlanStatistics.from_dict(payload.get("statistics", {}))
             if payload.get("statistics")
             else None,
@@ -355,17 +405,19 @@ class CaseStep:
 class PlanCase:
     """`/test-plans/{plan}/cases` 接口返回的用例模型。"""
 
-    id: int
-    case_id: int
+    id: Optional[int]
+    case_id: Optional[str]
     title: str
     priority: Optional[str]
     latest_result: Optional[str]
     preconditions: Optional[str]
     expected_result: Optional[str]
+    device_id: Optional[str]
+    device_name: Optional[str]
     include: bool
     compatibility_testing: bool
     order_no: Optional[int]
-    plan_id: Optional[int]
+    plan_id: Optional[str]
     keywords: List[str] = field(default_factory=list)
     group_path: Optional[str] = None
     workload_minutes: Optional[int] = None
@@ -377,17 +429,19 @@ class PlanCase:
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanCase":
         return cls(
             id=payload.get("id"),
-            case_id=payload.get("case_id"),
+            case_id=str(payload.get("case_id")) if payload.get("case_id") is not None else None,
             title=payload.get("title", ""),
             priority=payload.get("priority"),
-            latest_result=payload.get("latest_result"),
+            latest_result=payload.get("run_result") or payload.get("latest_result"),
             preconditions=payload.get("preconditions"),
             expected_result=payload.get("expected_result"),
+            device_id=str(payload.get("device_id")) if payload.get("device_id") is not None else None,
+            device_name=payload.get("device_name"),
             include=payload.get("include", True),
             compatibility_testing=bool(payload.get("compatibility_testing", False)),
             order_no=payload.get("order_no"),
-            plan_id=payload.get("plan_id"),
-            keywords=list(payload.get("keywords") or []),
+            plan_id=str(payload.get("plan_id")) if payload.get("plan_id") is not None else None,
+            keywords=_normalize_keywords(payload.get("keywords")),
             group_path=payload.get("group_path"),
             workload_minutes=payload.get("workload_minutes"),
             execution_results=[
@@ -395,7 +449,7 @@ class PlanCase:
                 for result in payload.get("execution_results", [])
             ],
             device_models=_collect_device_models(payload),
-            steps=[CaseStep.from_dict(step) for step in payload.get("steps", [])],
+            steps=_normalize_steps(payload.get("steps")),
         )
 
     def keyword_actions(self) -> List[str]:
@@ -484,3 +538,31 @@ def _collect_device_models(payload: Dict[str, Any]) -> List[DeviceModel]:
         # 合并来自计划/执行记录的机型列表，后写入的覆盖前者
         seen[model.id] = model
     return list(seen.values())
+
+
+def _normalize_keywords(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        text = raw.strip()
+        return [text] if text else []
+    if isinstance(raw, list):
+        return [str(item) for item in raw if item]
+    return [str(raw)]
+
+
+def _normalize_steps(raw: Any) -> List[CaseStep]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        return [CaseStep(no=None, action=text, expected=None, keyword=None, note=None)]
+    if isinstance(raw, list):
+        steps: List[CaseStep] = []
+        for item in raw:
+            if isinstance(item, dict):
+                steps.append(CaseStep.from_dict(item))
+        return steps
+    return []

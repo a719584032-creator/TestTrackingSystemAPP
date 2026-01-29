@@ -12,7 +12,7 @@ from config.settings import APP_VERSION
 ROOT = Path(__file__).resolve().parent
 BUILD_DIR = ROOT / "build"
 DIST_ROOT = ROOT / "dist"
-APP_NAME = "tts-app"
+APP_NAME = "feiyan-app"
 
 
 def _collect_hidden_imports(packages: list[str]) -> list[str]:

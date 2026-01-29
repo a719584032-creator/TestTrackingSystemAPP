@@ -6,11 +6,12 @@ import itertools
 import json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from monitoring.ladm import check_ladm_ready
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -101,7 +102,7 @@ class CaseDisplayEntry:
         # 获取最新用例结果并判断是否是通用用例
         if self.execution and self.execution.result:
             return self.execution.result.lower()
-        if self.is_general and self.case.latest_result:
+        if self.case.latest_result:
             return self.case.latest_result.lower()
         return "pending"
 
@@ -116,9 +117,9 @@ class RefreshResult:
     plan_detail: Optional[PlanDetail] = None
     cases: List[PlanCase] = field(default_factory=list)
     group_tree: Optional[GroupTreeNode] = None
-    selected_department_id: Optional[int] = None
-    selected_project_id: Optional[int] = None
-    selected_plan_id: Optional[int] = None
+    selected_department_id: Optional[str] = None
+    selected_project_id: Optional[str] = None
+    selected_plan_id: Optional[str] = None
     message: Optional[str] = None
     auth_error: bool = False
     success: bool = False
@@ -354,9 +355,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._execution_locked = False
         self._awaiting_monitor_completion_for_pass = False
         self._pending_filter_state: Optional[Dict[str, object]] = None
-        self._pending_selection: Optional[Tuple[int, Optional[int], Optional[int], bool]] = None
+        self._pending_selection: Optional[Tuple[str, Optional[int], Optional[int], bool]] = None
         self._auto_start_in_progress = False
-        self._case_execution_start_times: Dict[int, str] = {}
+        self._case_execution_start_times: Dict[str, str] = {}
         self._audio_log_files: List[str] = []
         self._pending_audio_logs: Optional[List[str]] = None
         self._audio_log_dir_hint = str(SETTINGS.log_root / "logs")
@@ -389,9 +390,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 记录UI状态
         self._state_file_path = SETTINGS.ui_state_file
-        self._restore_department_id: Optional[int] = None
-        self._restore_project_id: Optional[int] = None
-        self._restore_plan_id: Optional[int] = None
+        self._restore_department_id: Optional[str] = None
+        self._restore_project_id: Optional[str] = None
+        self._restore_plan_id: Optional[str] = None
         self._restore_start_clicked = False
         self.restore_state()
 
@@ -692,6 +693,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._audio_log_status.setWordWrap(True)
         audio_row.addWidget(self._audio_log_status, 1)
 
+        self._import_plan_btn = QtWidgets.QPushButton("导入飞雁计划")
+        self._export_plan_btn = QtWidgets.QPushButton("导出飞雁计划")
+        audio_row.addWidget(self._import_plan_btn)
+        audio_row.addWidget(self._export_plan_btn)
+
         # Temporarily disabled per request.
         # self._display_case_btn = QtWidgets.QPushButton("DisplayCase")
         # audio_row.addWidget(self._display_case_btn)
@@ -965,8 +971,76 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_audio_log_hint()
         self.save_state()
 
+    def _import_feiyan_plan(self) -> None:
+        """ 导入飞雁计划 """
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "导入飞雁计划",
+            "",
+            "Excel files (*.xlsx *.xls);;All files (*)",
+        )
+        if not file_path:
+            return
+        try:
+            payload = self._api.import_test_plan(file_path)
+        except AuthenticationError:
+            QtWidgets.QMessageBox.critical(self, "未授权", "凭据已失效，请重新登录。")
+            self.close()
+            return
+        except (ClientError, NetworkError) as exc:
+            QtWidgets.QMessageBox.warning(self, "导入失败", str(exc))
+            return
+        message = self._format_plan_transfer_result(payload, "导入")
+        if self._has_plan_transfer_errors(payload):
+            QtWidgets.QMessageBox.warning(self, "导入结果", message)
+        else:
+            QtWidgets.QMessageBox.information(self, "导入结果", message)
+        if self._id_or_none(self._project_combo.currentData()):
+            self._on_project_changed(self._project_combo.currentIndex())
+
+    def _export_feiyan_plan(self) -> None:
+        """ 导出飞雁计划 """
+        plan_id = self._id_or_none(self._plan_combo.currentData())
+        if not plan_id:
+            QtWidgets.QMessageBox.information(self, "导出飞雁计划", "请先选择计划。")
+            return
+        try:
+            content, filename, payload = self._api.export_test_plan(plan_id)
+        except AuthenticationError:
+            QtWidgets.QMessageBox.critical(self, "未授权", "凭据已失效，请重新登录。")
+            self.close()
+            return
+        except (ClientError, NetworkError) as exc:
+            QtWidgets.QMessageBox.warning(self, "导出失败", str(exc))
+            return
+        if payload is not None:
+            message = self._format_plan_transfer_result(payload, "导出")
+            if self._has_plan_transfer_errors(payload):
+                QtWidgets.QMessageBox.warning(self, "导出结果", message)
+            else:
+                QtWidgets.QMessageBox.information(self, "导出结果", message)
+            return
+        if not content:
+            QtWidgets.QMessageBox.warning(self, "导出失败", "未获取到可保存的文件内容。")
+            return
+        default_name = filename or self._default_export_filename(plan_id)
+        save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "导出飞雁计划",
+            default_name,
+            "Excel files (*.xlsx *.xls);;All files (*)",
+        )
+        if not save_path:
+            return
+        try:
+            Path(save_path).write_bytes(content)
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "保存失败", str(exc))
+            return
+        QtWidgets.QMessageBox.information(self, "导出成功", "飞雁计划已保存。")
+
     def _open_display_case_dialog(self) -> None:
-        plan_id = self._int_or_none(self._plan_combo.currentData())
+        plan_id = self._id_or_none(self._plan_combo.currentData())
         if plan_id is None:
             QtWidgets.QMessageBox.information(
                 self,
@@ -985,7 +1059,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.exec_()
 
     def _open_port_permutation_dialog(self) -> None:
-        plan_id = self._int_or_none(self._plan_combo.currentData())
+        plan_id = self._id_or_none(self._plan_combo.currentData())
         if plan_id is None:
             QtWidgets.QMessageBox.information(
                 self,
@@ -1006,7 +1080,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _generate_display_cases(
         self,
-        plan_id: int,
+        plan_id: str,
         selections: List[DisplayCaseSelection],
         dialog: QtWidgets.QDialog,
     ) -> None:
@@ -1027,7 +1101,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     ],
                     "expected_result": "1. No error message\n2. No blinking\n3. No garbage\n4. Monitor display normal\n5. Display mode can keep\n6.Resolution and refresh rate can keep",
                     "priority": "P1",
-                    "group_path": "root/DisPlayCase",
+                    "group_path": "DisPlayCase",
                     "compatibility_testing": False,
                 }
             )
@@ -1042,7 +1116,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _generate_port_permutation_cases(
         self,
-        plan_id: int,
+        plan_id: str,
         ports: List[str],
         devices: List[str],
         dialog: QtWidgets.QDialog,
@@ -1081,7 +1155,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     ],
                     "expected_result": "功能正常",
                     "priority": "P1",
-                    "group_path": "root/多口排列组合用例",
+                    "group_path": "多口排列组合用例",
                     "compatibility_testing": False,
                 }
             )
@@ -1094,7 +1168,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "生成用例成功", "已成功生成多口排列用例。")
         self._on_plan_changed(self._plan_combo.currentIndex())
 
-    def _fetch_all_cases_for_plan(self, plan_id: int) -> List[PlanCase]:
+    def _fetch_all_cases_for_plan(self, plan_id: str) -> List[PlanCase]:
         try:
             result = self._api.get_plan_cases(plan_id, page_size=1000)
             return result.items
@@ -1102,7 +1176,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._logger.warning("加载计划用例失败: %s", exc)
             return list(self._cases)
 
-    def _next_display_case_index(self, plan_id: int) -> int:
+    def _next_display_case_index(self, plan_id: str) -> int:
         prefix = "DisPlayCase"
         max_index = 0
         for case in self._fetch_all_cases_for_plan(plan_id):
@@ -1114,7 +1188,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 max_index = max(max_index, int(suffix))
         return max_index + 1
 
-    def _next_port_permutation_index(self, plan_id: int) -> int:
+    def _next_port_permutation_index(self, plan_id: str) -> int:
         prefix = "MultiPortPermutationCase"
         max_index = 0
         for case in self._fetch_all_cases_for_plan(plan_id):
@@ -1154,6 +1228,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._select_audio_logs_btn.clicked.connect(self._select_audio_logs)
         # 清除 audio 日志
         self._clear_audio_logs_btn.clicked.connect(self._clear_audio_logs)
+        # 导入/导出
+        self._import_plan_btn.clicked.connect(self._import_feiyan_plan)
+        self._export_plan_btn.clicked.connect(self._export_feiyan_plan)
         # DisplayCase
         # self._display_case_btn.clicked.connect(self._open_display_case_dialog)
         # 多口排列
@@ -1202,6 +1279,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return ""
 
     @staticmethod
+    def _id_or_none(value: object) -> Optional[str]:
+        """ID conversion helper."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return str(value)
+
+    @staticmethod
     def _int_or_none(value: object) -> Optional[int]:
         """ 数据类型转换辅助 """
         if value is None or value == "":
@@ -1212,13 +1299,74 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
 
     @staticmethod
+    def _sanitize_filename(value: str) -> str:
+        if not value:
+            return ""
+        cleaned = re.sub(r'[\\/:*?"<>|]+', "_", value).strip()
+        return cleaned
+
+    def _default_export_filename(self, plan_id: str) -> str:
+        plan_name = ""
+        for plan in self._plans:
+            if self._id_or_none(getattr(plan, "id", None)) == plan_id:
+                plan_name = str(getattr(plan, "name", "") or "")
+                break
+        safe_name = self._sanitize_filename(plan_name)
+        if safe_name:
+            return f"{safe_name}.xlsx"
+        return f"plan_{plan_id}.xlsx"
+
+    def _format_plan_transfer_result(self, payload: Any, action: str) -> str:
+        if not isinstance(payload, dict):
+            return f"{action}完成"
+        message = str(payload.get("message") or f"{action}完成")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return message
+        errors = data.get("errors")
+        if not isinstance(errors, list):
+            errors = [] if errors in (None, "") else [str(errors)]
+        failure_count = data.get("failure_count")
+        success_count = data.get("success_count")
+        lines = [message]
+        if success_count is not None:
+            lines.append(f"成功数量: {success_count}")
+        if failure_count is not None:
+            lines.append(f"失败数量: {failure_count}")
+        if errors:
+            lines.append("错误列表:")
+            lines.extend(f"- {item}" for item in errors)
+        else:
+            lines.append("错误列表: 无")
+        return "\n".join(lines)
+
+    def _has_plan_transfer_errors(self, payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return False
+        failure_count = data.get("failure_count")
+        try:
+            failure_num = int(failure_count) if failure_count is not None else 0
+        except (TypeError, ValueError):
+            failure_num = 0
+        if failure_num > 0:
+            return True
+        errors = data.get("errors")
+        return bool(errors)
+    @staticmethod
     def _normalize_token(value: str) -> str:
         return value.strip().lower().replace(" ", "")
 
-    def _monitoring_case_id(self, case: Optional[PlanCase]) -> Optional[int]:
+    def _monitoring_case_id(self, case: Optional[PlanCase]) -> Optional[str]:
         if not case:
             return None
-        return self._int_or_none(getattr(case, "case_id", None))
+        case_id = getattr(case, "case_id", None)
+        if case_id:
+            return str(case_id)
+        raw_id = getattr(case, "id", None)
+        return str(raw_id) if raw_id is not None else None
 
     def _load_state_payload(self) -> Dict[str, object]:
         """ 读取保存的请求参数，用于窗口回放 """
@@ -1257,14 +1405,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pending_audio_logs = None
             return
         # 上一次的筛选项
-        self._restore_department_id = self._int_or_none(state.get("department_id"))
-        self._restore_project_id = self._int_or_none(state.get("project_id"))
-        self._restore_plan_id = self._int_or_none(state.get("plan_id"))
+        self._restore_department_id = self._id_or_none(state.get("department_id"))
+        self._restore_project_id = self._id_or_none(state.get("project_id"))
+        self._restore_plan_id = self._id_or_none(state.get("plan_id"))
 
         filters = state.get("filters")
         if isinstance(filters, dict):
+            directory = filters.get("directory")
+            if isinstance(directory, str) and directory.strip():
+                normalized = directory.strip()
+                if normalized.lower().startswith("root/"):
+                    directory = normalized[5:] or None
             self._pending_filter_state = {
-                "directory": filters.get("directory"),
+                "directory": directory,
                 "device": filters.get("device"),
                 "result": filters.get("result"),
             }
@@ -1279,7 +1432,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ):
             try:
                 self._pending_selection = (
-                    int(selection[0]),
+                    str(selection[0]),
                     self._int_or_none(selection[1]),
                     self._int_or_none(selection[2]),
                     bool(selection[3]),
@@ -1305,9 +1458,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         state: Dict[str, object] = {
             "username": username,
-            "department_id": self._int_or_none(self._department_combo.currentData()),
-            "project_id": self._int_or_none(self._project_combo.currentData()),
-            "plan_id": self._int_or_none(self._plan_combo.currentData()),
+            "department_id": self._id_or_none(self._department_combo.currentData()),
+            "project_id": self._id_or_none(self._project_combo.currentData()),
+            "plan_id": self._id_or_none(self._plan_combo.currentData()),
             "filters": {
                 "directory": self._directory_filter.currentData(),
                 "device": self._device_filter.currentData(),
@@ -1458,7 +1611,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_department_changed(self, _index: object) -> None:
         """ 联动筛选框，部门改变时重新获取项目 """
-        dept_id = self._int_or_none(self._department_combo.currentData())
+        dept_id = self._id_or_none(self._department_combo.currentData())
         if dept_id is None:
             self._projects = []
             self._plans = []
@@ -1470,7 +1623,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 item
                 for item in self._departments
-                if self._int_or_none(getattr(item, "id", None)) == dept_id
+                if self._id_or_none(getattr(item, "id", None)) == dept_id
             ),
             None,
         )
@@ -1481,7 +1634,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._logger.info("选择部门 %s (ID: %s)", dept.name, dept_id)
 
         try:
-            self._projects = self._api.get_projects(int(dept_id))
+            self._projects = self._api.get_projects(dept_id)
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载项目失败", str(exc))
             self._projects = []
@@ -1494,8 +1647,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_project_changed(self, _index: object) -> None:
         """ 联动筛选框，项目改变时重新获取计划 """
-        project_id = self._int_or_none(self._project_combo.currentData())
-        dept_id = self._int_or_none(self._department_combo.currentData())
+        project_id = self._id_or_none(self._project_combo.currentData())
+        dept_id = self._id_or_none(self._department_combo.currentData())
         if project_id is None:
             self._plans = []
             self._clear_plan_combo()
@@ -1509,7 +1662,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 item
                 for item in self._projects
-                if self._int_or_none(getattr(item, "id", None)) == project_id
+                if self._id_or_none(getattr(item, "id", None)) == project_id
             ),
             None,
         )
@@ -1525,7 +1678,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         try:
-            self._plans = self._api.get_test_plans(int(dept_id), int(project_id))
+            self._plans = self._api.get_test_plans(dept_id, project_id)
         except ClientError as exc:
             QtWidgets.QMessageBox.warning(self, "加载计划失败", str(exc))
             self._plans = []
@@ -1537,7 +1690,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_plan_changed(self, _index: object) -> None:
         """ 联动筛选框，计划改变时重新获取用例 """
-        plan_id = self._int_or_none(self._plan_combo.currentData())
+        plan_id = self._id_or_none(self._plan_combo.currentData())
         if plan_id is None:
             self._pending_filter_state = None
             self._cases = []
@@ -1555,7 +1708,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 item
                 for item in self._plans
-                if self._int_or_none(getattr(item, "id", None)) == plan_id
+                if self._id_or_none(getattr(item, "id", None)) == plan_id
             ),
             None,
         )
@@ -1578,7 +1731,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         filter_state = self._pending_filter_state or {}
         group_path = self._coerce_group_path(filter_state.get("directory"))
-        device_model_id = self._int_or_none(filter_state.get("device"))
+        group_path = self._normalize_group_path_for_request(group_path)
+        device_id = self._id_or_none(filter_state.get("device"))
         status = self._normalize_status_param(filter_state.get("result"))
 
         self._cases = []
@@ -1586,7 +1740,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_plan_cases(
             plan_id,
             group_path=group_path,
-            device_model_id=device_model_id,
+            device_id=device_id,
             status=status,
             update_group_tree=True,
         )
@@ -1599,15 +1753,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_device_filter(self) -> None:
         """ 设备过滤筛选 """
-        devices: Dict[int, str] = {}
+        devices: Dict[str, str] = {}
         detail = self._plan_detail
         if detail:
-            for model in detail.device_models:
-                model_id = getattr(model, "id", None)
-                if model_id is None:
+            for device in detail.devices:
+                device_id = getattr(device, "id", None)
+                if not device_id:
                     continue
-                label = self._format_device_label(model.name, model.model_code, model_id)
-                devices[int(model_id)] = label
+                label = (device.name or "").strip() or f"Device #{device_id}"
+                devices[str(device_id)] = label
 
         self._device_filter_required = bool(devices)
         self._device_filter.blockSignals(True)
@@ -1683,7 +1837,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self,
         name: Optional[str],
         model_code: Optional[str],
-        device_id: Optional[int],
+        device_id: Optional[object],
     ) -> str:
         """ 格式话设备显示 """
         if name:
@@ -1691,7 +1845,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if model_code:
             return model_code
         if device_id:
-            return f"机型#{device_id}"
+            return f"设备#{device_id}"
         return "通用"
 
     def _latest_execution_for_device(
@@ -1720,98 +1874,19 @@ class MainWindow(QtWidgets.QMainWindow):
         return max(executions, key=lambda item: item.executed_at or "")
 
     def _build_case_entries(self, case: PlanCase) -> List[CaseDisplayEntry]:
-        """
-        核心：一个 case 可能对应多个“执行设备”的行（一个 case + 多机型，树里每个 entry 一行）
-        逻辑：
-        先用 case.device_models 生成 entries（每个设备一条）
-        再补充那些虽然不在 device_models，但 execution_results 里出现过的“额外设备”
-        如果完全没设备信息，就生成一个 “通用” entry（is_general=True）。
-        """
-        entries: List[CaseDisplayEntry] = []
-        executions = case.execution_results or []
-        compatibility_enabled = bool(getattr(case, "compatibility_testing", False))
-        device_models = (
-            {
-                model.id: model
-                for model in case.device_models
-                if getattr(model, "id", None)
-            }
-            if compatibility_enabled
-            else {}
-        )
-
-        if compatibility_enabled and device_models:
-            seen_devices: set[int] = set()
-            for device_id, model in device_models.items():
-                execution = self._latest_execution_for_device(executions, device_id)
-                label = self._format_device_label(model.name, model.model_code, device_id)
-                plan_device_model_id = execution.plan_device_model_id if execution else None
-                entries.append(
-                    CaseDisplayEntry(
-                        case=case,
-                        execution=execution,
-                        device_label=label,
-                        device_model_id=device_id,
-                        plan_device_model_id=plan_device_model_id,
-                        is_general=False,
-                    )
-                )
-                seen_devices.add(device_id)
-
-            extra_results: Dict[int, CaseExecutionResult] = {}
-            for execution in executions:
-                if not execution.device_model_id:
-                    continue
-                device_id = int(execution.device_model_id)
-                if device_id in seen_devices:
-                    continue
-                current = extra_results.get(device_id)
-                if not current or (execution.executed_at or "") > (current.executed_at or ""):
-                    extra_results[device_id] = execution
-            for device_id, execution in extra_results.items():
-                label = self._format_device_label(
-                    execution.device_model_name,
-                    execution.device_model_code,
-                    device_id,
-                )
-                entries.append(
-                    CaseDisplayEntry(
-                        case=case,
-                        execution=execution,
-                        device_label=label,
-                        device_model_id=device_id,
-                        plan_device_model_id=execution.plan_device_model_id,
-                        is_general=False,
-                    )
-                )
-                seen_devices.add(device_id)
-
-            if not entries:
-                execution = self._latest_execution_any(executions)
-                entries.append(
-                    CaseDisplayEntry(
-                        case=case,
-                        execution=execution,
-                        device_label="通用",
-                        device_model_id=None,
-                        plan_device_model_id=execution.plan_device_model_id if execution else None,
-                        is_general=True,
-                    )
-                )
-            return entries
-
-        execution = self._latest_execution_any(executions)
-        entries.append(
+        """Use per-case device name/id from the latest API response."""
+        label = (case.device_name or "").strip() or "Unknown device"
+        device_id = self._int_or_none(getattr(case, "device_id", None))
+        return [
             CaseDisplayEntry(
                 case=case,
-                execution=execution,
-                device_label="通用",
-                device_model_id=None,
+                execution=None,
+                device_label=label,
+                device_model_id=device_id,
                 plan_device_model_id=None,
-                is_general=True,
+                is_general=False,
             )
-        )
-        return entries
+        ]
 
     def _refresh_case_entries(self) -> None:
         entries: List[CaseDisplayEntry] = []
@@ -1831,27 +1906,47 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _coerce_group_path(self, value: object) -> Optional[str]:
         if isinstance(value, str) and value.strip():
-            return value
+            return value.strip() or None
         return None
+
+    def _has_group_path(self, group_path: str) -> bool:
+        for case in self._cases:
+            path = (case.group_path or "").strip()
+            if not path:
+                continue
+            if path == group_path or path.startswith(f"{group_path}/"):
+                return True
+        return False
+
+    def _normalize_group_path_for_request(self, group_path: Optional[str]) -> Optional[str]:
+        if not group_path:
+            return None
+        if group_path.lower().startswith("root/"):
+            stripped = group_path[5:]
+            if stripped and self._has_group_path(stripped):
+                return stripped
+        return group_path
 
     def _current_filter_params(
         self,
-    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         group_path = self._coerce_group_path(self._directory_filter.currentData())
-        device_model_id = (
-            self._int_or_none(self._device_filter.currentData())
+        group_path = self._normalize_group_path_for_request(group_path)
+        group_path = self._normalize_group_path_for_request(group_path)
+        device_id = (
+            self._id_or_none(self._device_filter.currentData())
             if self._device_filter_required
             else None
         )
         status = self._normalize_status_param(self._result_filter.currentData())
-        return group_path, device_model_id, status
+        return group_path, device_id, status
 
     def _load_plan_cases(
         self,
-        plan_id: int,
+        plan_id: str,
         *,
         group_path: Optional[str],
-        device_model_id: Optional[int],
+        device_id: Optional[str],
         status: Optional[str],
         update_group_tree: bool = False,
     ) -> bool:
@@ -1859,7 +1954,7 @@ class MainWindow(QtWidgets.QMainWindow):
             result = self._api.get_plan_cases(
                 plan_id,
                 group_path=group_path,
-                device_model_id=device_model_id,
+                device_id=device_id,
                 status=status,
             )
         except ClientError as exc:
@@ -1878,14 +1973,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_filters(self) -> None:
         """应用筛选：目录、设备、结果过滤用例。"""
-        plan_id = self._int_or_none(self._plan_combo.currentData())
+        plan_id = self._id_or_none(self._plan_combo.currentData())
         if plan_id is None:
             return
-        group_path, device_model_id, status = self._current_filter_params()
+        group_path, device_id, status = self._current_filter_params()
         if not self._load_plan_cases(
             plan_id,
             group_path=group_path,
-            device_model_id=device_model_id,
+            device_id=device_id,
             status=status,
         ):
             return
@@ -2153,15 +2248,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _selection_key(
         self, entry: Optional[CaseDisplayEntry]
-    ) -> Optional[Tuple[int, Optional[int], Optional[int], bool]]:
+    ) -> Optional[Tuple[str, Optional[int], Optional[int], bool]]:
         """ 选中用例 key / 展示文本 / 用例选中事件，记录元组 """
         if not entry:
             return None
-        case_identifier: Optional[int] = None
-        if entry.case.id is not None:
-            case_identifier = int(entry.case.id)
-        elif entry.case.case_id is not None:
-            case_identifier = int(entry.case.case_id)
+        case_identifier: Optional[str] = None
+        if entry.case.case_id is not None:
+            case_identifier = str(entry.case.case_id)
+        elif entry.case.id is not None:
+            case_identifier = str(entry.case.id)
         if case_identifier is None:
             return None
         device_id = entry.device_model_id
@@ -2420,7 +2515,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_nine_grid_actions(self) -> List[NineGridAction]:
         detail = self._plan_detail
         if not detail or not detail.dock_nine_gird:
-            plan_id = self._int_or_none(self._plan_combo.currentData())
+            plan_id = self._id_or_none(self._plan_combo.currentData())
             if plan_id is None:
                 return []
             try:
@@ -2433,7 +2528,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return []
         return build_nine_grid_actions(detail.dock_nine_gird)
 
-    def _load_nine_grid_actions_from_session(self, case_id: int) -> List[NineGridAction]:
+    def _load_nine_grid_actions_from_session(self, case_id: str) -> List[NineGridAction]:
         store = SessionStateStore(
             SETTINGS.monitoring_temp_file,
             SETTINGS.monitoring_cache_file,
@@ -2457,7 +2552,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return session_actions
         return self._load_nine_grid_actions()
 
-    def _has_pending_monitoring_session(self, case_id: int) -> bool:
+    def _has_pending_monitoring_session(self, case_id: str) -> bool:
         store = SessionStateStore(
             SETTINGS.monitoring_temp_file,
             SETTINGS.monitoring_cache_file,
@@ -2501,9 +2596,10 @@ class MainWindow(QtWidgets.QMainWindow):
             monitoring_actions = filter_monitoring_actions(self._current_actions)
             if self._current_case and self._case_has_display_keyword(self._current_case):
                 monitoring_actions.extend(self._display_keyword_actions())
-            start_time = dt.datetime.now(dt.timezone.utc).isoformat()
-            if self._current_case and self._current_case.id:
-                self._case_execution_start_times[int(self._current_case.id)] = start_time
+            start_time = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            case_key = self._monitoring_case_id(self._current_case)
+            if case_key:
+                self._case_execution_start_times[case_key] = start_time
             require_audio_logs = requires_audio_logs(self._current_actions)
             if require_audio_logs and not self._audio_log_files:
                 QtWidgets.QMessageBox.warning(
@@ -2550,8 +2646,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._append_log("检测到九宫格关键字，将按九宫格动作顺序执行。")
             self._awaiting_monitor_completion_for_pass = bool(monitoring_actions)
             if monitoring_actions:
+                case_key = self._monitoring_case_id(self._current_case)
+                if case_key is None:
+                    QtWidgets.QMessageBox.warning(self, "Missing case ID", "Unable to start monitoring.")
+                    return
                 self._monitoring.start(
-                    self._current_case.case_id,
+                    case_key,
                     monitoring_actions,
                     start_time,
                     audio_log_files=self._audio_log_files,
@@ -2571,7 +2671,7 @@ class MainWindow(QtWidgets.QMainWindow):
         result: Optional[str] = None
         if entry.execution and entry.execution.result:
             result = entry.execution.result
-        elif entry.is_general and entry.case.latest_result:
+        elif entry.case.latest_result:
             result = entry.case.latest_result
         normalized = (result or "").strip().lower()
         if not normalized or normalized == "pending":
@@ -2596,7 +2696,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return device_model_id, plan_device_model_id, hint_text
 
     def _submit_result(self, result: str) -> None:
-        """ 更新结果 """
+        """提交结果。"""
         if not self._current_case:
             QtWidgets.QMessageBox.warning(self, "未选择", "请先选择用例")
             return
@@ -2635,12 +2735,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
             return
-        plan_id = self._int_or_none(self._plan_combo.currentData())
-        plan_case_id = self._current_case.id
-        if plan_id is None or plan_case_id is None:
-            QtWidgets.QMessageBox.warning(self, "提交失败", "当前计划信息缺失，请刷新后重试。")
+        plan_id = self._id_or_none(self._plan_combo.currentData())
+        case_id_ext = (
+            str(self._current_case.case_id)
+            if self._current_case.case_id is not None
+            else (str(self._current_case.id) if self._current_case.id is not None else None)
+        )
+        if plan_id is None or not case_id_ext:
+            QtWidgets.QMessageBox.warning(self, "提交失败", "计划或用例信息缺失，请刷新后重试。")
             return
-        plan_case_key = int(plan_case_id)
+        plan_case_key = case_id_ext
         remark = dialog.remark()
         failure_reason = dialog.failure_reason()
         bug_ref = dialog.bug_ref()
@@ -2673,28 +2777,22 @@ class MainWindow(QtWidgets.QMainWindow):
             if not result_check.ok:
                 QtWidgets.QMessageBox.warning(self, result_check.title, result_check.message)
                 return
-        attachments = [
-            {k: v for k, v in payload.items() if k != "local_path"}
-            for payload in attachments_with_local
-        ]
+        attachments = list(attachments_with_local)
         if self._monitoring.is_running():
             self._monitoring.stop()
             self._append_log("监控停止请求已发送")
         self._awaiting_monitor_completion_for_pass = False
         execution_start_time = self._case_execution_start_times.get(plan_case_key)
-        execution_end_time = dt.datetime.now(dt.timezone.utc).isoformat()
+        execution_end_time = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if not execution_start_time:
             execution_start_time = execution_end_time
         try:
             self._api.submit_result(
-                int(plan_id),
-                int(plan_case_id),
+                plan_id,
+                case_id_ext,
                 result,
                 remark=remark,
-                failure_reason=failure_reason,
                 bug_ref=bug_ref,
-                device_model_id=device_model_id,
-                plan_device_model_id=plan_device_model_id,
                 attachments=attachments or None,
                 execution_start_time=execution_start_time,
                 execution_end_time=execution_end_time,
@@ -2705,24 +2803,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self._case_execution_start_times.pop(plan_case_key, None)
         self._monitoring.discard_session_state()
         self._logger.info(
-            "提交结果: 用例 %s (结果=%s, 设备=%s, 计划设备=%s)",
-            self._current_case.case_id,
+            "提交结果: 用例 %s (结果=%s, 设备ID=%s, 设备名称=%s)",
+            case_id_ext,
             result,
-            device_model_id,
-            plan_device_model_id,
+            self._current_case.device_id,
+            self._current_case.device_name,
         )
-        QtWidgets.QMessageBox.information(self, "成功", "结果已提交")
+        QtWidgets.QMessageBox.information(self, "成功", "结果已提交。")
         self._set_execution_lock(False)
         self.save_state()
         self._reload_current_plan()
-        # 强制等待保证稳定性
         time.sleep(0.2)
         self._set_action_buttons_mode(False)
 
     def _reload_current_plan(self) -> None:
         """ 计划重载 """
         self._pending_selection = self._selection_key(self._current_entry)
-        plan_id = self._int_or_none(self._plan_combo.currentData())
+        plan_id = self._id_or_none(self._plan_combo.currentData())
         if plan_id is not None:
             self._pending_filter_state = {
                 "directory": self._directory_filter.currentData(),
@@ -2745,9 +2842,9 @@ class MainWindow(QtWidgets.QMainWindow):
             "device": self._device_filter.currentData(),
             "result": self._result_filter.currentData(),
         }
-        restore_department_id = self._int_or_none(self._department_combo.currentData())
-        restore_project_id = self._int_or_none(self._project_combo.currentData())
-        restore_plan_id = self._int_or_none(self._plan_combo.currentData())
+        restore_department_id = self._id_or_none(self._department_combo.currentData())
+        restore_project_id = self._id_or_none(self._project_combo.currentData())
+        restore_plan_id = self._id_or_none(self._plan_combo.currentData())
         pending_filters = dict(self._pending_filter_state or {})
         self._restore_department_id = restore_department_id
         self._restore_project_id = restore_project_id
@@ -2762,9 +2859,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_all_data_worker(
         self,
-        department_id: Optional[int],
-        project_id: Optional[int],
-        plan_id: Optional[int],
+        department_id: Optional[str],
+        project_id: Optional[str],
+        plan_id: Optional[str],
         filters: Optional[Dict[str, object]],
     ) -> None:
         """后台线程：获取刷新所需的数据后通知主线程应用。"""
@@ -2793,7 +2890,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         result.success = True  # 部门列表获取成功即认为基础刷新成功
         valid_department_ids = {
-            self._int_or_none(getattr(dept, "id", None)) for dept in result.departments
+            self._id_or_none(getattr(dept, "id", None)) for dept in result.departments
         }
         if department_id not in valid_department_ids:
             department_id = None
@@ -2803,7 +2900,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.projects = self._api.get_projects(int(department_id))
+            result.projects = self._api.get_projects(department_id)
         except ClientError as exc:
             result.message = f"加载项目失败: {exc}"
             self._refresh_complete_signal.emit(result)
@@ -2815,7 +2912,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         valid_project_ids = {
-            self._int_or_none(getattr(project, "id", None)) for project in result.projects
+            self._id_or_none(getattr(project, "id", None)) for project in result.projects
         }
         if project_id not in valid_project_ids:
             project_id = None
@@ -2825,7 +2922,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.plans = self._api.get_test_plans(int(department_id), int(project_id))
+            result.plans = self._api.get_test_plans(department_id, project_id)
         except ClientError as exc:
             result.message = f"加载计划失败: {exc}"
             self._refresh_complete_signal.emit(result)
@@ -2836,7 +2933,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_complete_signal.emit(result)
             return
 
-        valid_plan_ids = {self._int_or_none(getattr(plan, "id", None)) for plan in result.plans}
+        valid_plan_ids = {self._id_or_none(getattr(plan, "id", None)) for plan in result.plans}
         if plan_id not in valid_plan_ids:
             plan_id = None
         result.selected_plan_id = plan_id
@@ -2845,7 +2942,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.plan_detail = self._api.get_plan_detail(int(plan_id))
+            result.plan_detail = self._api.get_plan_detail(plan_id)
         except AuthenticationError:
             result.auth_error = True
             result.message = "凭据已失效，请重新登录。"
@@ -2859,13 +2956,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         filter_state = filters or {}
         group_path = self._coerce_group_path(filter_state.get("directory"))
-        device_model_id = self._int_or_none(filter_state.get("device"))
+        group_path = self._normalize_group_path_for_request(group_path)
+        device_id = self._id_or_none(filter_state.get("device"))
         status = self._normalize_status_param(filter_state.get("result"))
         try:
             cases_result = self._api.get_plan_cases(
-                int(plan_id),
+                plan_id,
                 group_path=group_path,
-                device_model_id=device_model_id,
+                device_id=device_id,
                 status=status,
             )
             result.cases = cases_result.items
@@ -3017,9 +3115,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_all_data_worker(
         self,
-        department_id: Optional[int],
-        project_id: Optional[int],
-        plan_id: Optional[int],
+        department_id: Optional[str],
+        project_id: Optional[str],
+        plan_id: Optional[str],
         filters: Optional[Dict[str, object]],
     ) -> None:
         """后台线程：获取刷新所需的数据后通知主线程应用。"""
@@ -3048,7 +3146,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         result.success = True  # 部门列表获取成功即认为基础刷新成功
         valid_department_ids = {
-            self._int_or_none(getattr(dept, "id", None)) for dept in result.departments
+            self._id_or_none(getattr(dept, "id", None)) for dept in result.departments
         }
         if department_id not in valid_department_ids:
             department_id = None
@@ -3058,7 +3156,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.projects = self._api.get_projects(int(department_id))
+            result.projects = self._api.get_projects(department_id)
         except ClientError as exc:
             result.message = f"加载项目失败: {exc}"
             self._refresh_complete_signal.emit(result)
@@ -3070,7 +3168,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         valid_project_ids = {
-            self._int_or_none(getattr(project, "id", None)) for project in result.projects
+            self._id_or_none(getattr(project, "id", None)) for project in result.projects
         }
         if project_id not in valid_project_ids:
             project_id = None
@@ -3080,7 +3178,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.plans = self._api.get_test_plans(int(department_id), int(project_id))
+            result.plans = self._api.get_test_plans(department_id, project_id)
         except ClientError as exc:
             result.message = f"加载计划失败: {exc}"
             self._refresh_complete_signal.emit(result)
@@ -3091,7 +3189,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_complete_signal.emit(result)
             return
 
-        valid_plan_ids = {self._int_or_none(getattr(plan, "id", None)) for plan in result.plans}
+        valid_plan_ids = {self._id_or_none(getattr(plan, "id", None)) for plan in result.plans}
         if plan_id not in valid_plan_ids:
             plan_id = None
         result.selected_plan_id = plan_id
@@ -3100,7 +3198,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            result.plan_detail = self._api.get_plan_detail(int(plan_id))
+            result.plan_detail = self._api.get_plan_detail(plan_id)
         except AuthenticationError:
             result.auth_error = True
             result.message = "凭据已失效，请重新登录。"
@@ -3114,13 +3212,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         filter_state = filters or {}
         group_path = self._coerce_group_path(filter_state.get("directory"))
-        device_model_id = self._int_or_none(filter_state.get("device"))
+        group_path = self._normalize_group_path_for_request(group_path)
+        device_id = self._id_or_none(filter_state.get("device"))
         status = self._normalize_status_param(filter_state.get("result"))
         try:
             cases_result = self._api.get_plan_cases(
-                int(plan_id),
+                plan_id,
                 group_path=group_path,
-                device_model_id=device_model_id,
+                device_id=device_id,
                 status=status,
             )
             result.cases = cases_result.items
