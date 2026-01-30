@@ -41,7 +41,7 @@ def allocate_instance_paths(base_root: Path | None = None) -> InstanceAllocation
     """
     为当前进程分配实例目录，并设置环境变量。
 
-    base_root 为空时，使用默认 PATVS 根目录 C:/PATVS。
+    base_root 为空时，使用默认 PATVS 根目录 C:/FEIYAN。
     """
 
     resolved_base = base_root or _default_base_root()
@@ -79,7 +79,7 @@ def allocate_instance_paths(base_root: Path | None = None) -> InstanceAllocation
 
 
 def _default_base_root() -> Path:
-    return Path("C:/PATVS")
+    return Path("C:/FEIYAN")
 
 
 def _allocation_from_env() -> InstanceAllocation | None:
@@ -96,7 +96,7 @@ def _allocation_from_env() -> InstanceAllocation | None:
     patvs_root = Path(patvs_env)
     config_root = Path(config_env)
     # 父目录以 slot- 开头
-    # patvs_root.parent   -> C:/PATVS/instances/slot-3
+    # patvs_root.parent   -> C:/FEIYAN/instances/slot-3
     # patvs_root.parent.name  -> "slot-3"
     slot_root = patvs_root.parent if patvs_root.parent.name.startswith("slot-") else None
     if slot_root is None and config_root.parent.name.startswith("slot-"):

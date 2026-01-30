@@ -1,6 +1,7 @@
 """服务端数据模型参数"""
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -55,7 +56,7 @@ class Project:
 class DeviceModel:
     """获取部门机型"""
 
-    id: int
+    id: Optional[str]
     name: str
     model_code: Optional[str]
     category: Optional[str]
@@ -273,24 +274,22 @@ class PlanDetail:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanDetail":
         dock_nine_gird = _normalize_nine_grid(payload.get("dock_nine_gird"))
+        raw_id = payload.get("plan_id")
+        statistics = _build_plan_statistics(payload)
         return cls(
-            id=payload.get("id"),
+            id=str(raw_id) if raw_id is not None else None,
             name=payload.get("name", ""),
             description=payload.get("description"),
             department_name=payload.get("department_name"),
             project_name=payload.get("project_name"),
-            start_date=payload.get("start_date"),
-            end_date=payload.get("end_date"),
+            start_date=payload.get("start_time"),
+            end_date=payload.get("end_time"),
             status=payload.get("status"),
-            testers=[PlanTester.from_dict(item) for item in payload.get("testers", [])],
-            device_models=[DeviceModel.from_dict(item) for item in payload.get("device_models", [])],
+            testers=_parse_testers(payload.get("tester_names")),
+            device_models=[],
             devices=[PlanDevice.from_dict(item) for item in payload.get("devices", [])],
-            statistics=PlanStatistics.from_dict(payload.get("statistics", {}))
-            if payload.get("statistics")
-            else None,
-            execution_runs=[
-                PlanExecutionRun.from_dict(item) for item in payload.get("execution_runs", [])
-            ],
+            statistics=statistics,
+            execution_runs=[],
             dock_nine_gird=dock_nine_gird,
         )
 
@@ -301,6 +300,64 @@ class PlanDetail:
             if name:
                 names.append(name)
         return names
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_plan_statistics(payload: Dict[str, Any]) -> PlanStatistics:
+    total = _safe_int(payload.get("total"))
+    passed = _safe_int(payload.get("passed"))
+    failed = _safe_int(payload.get("failed"))
+    blocked = _safe_int(payload.get("blocked"))
+    not_run = _safe_int(payload.get("not_run"))
+    executed = total - not_run if total else passed + failed + blocked
+    return PlanStatistics(
+        total_results=total,
+        executed_results=executed,
+        passed=passed,
+        failed=failed,
+        blocked=blocked,
+        skipped=0,
+        not_run=not_run,
+    )
+
+
+def _parse_testers(raw: Any) -> List[PlanTester]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return _parse_testers_from_list(raw)
+    if isinstance(raw, dict):
+        return _parse_testers_from_list([raw])
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            names = re.findall(r":\\s*\"?([^,\\]\\}]+)\"?", text)
+            return [PlanTester(id=None, name=name.strip()) for name in names if name.strip()]
+        return _parse_testers(data)
+    return []
+
+
+def _parse_testers_from_list(items: List[Any]) -> List[PlanTester]:
+    testers: List[PlanTester] = []
+    for item in items:
+        if isinstance(item, dict):
+            for key, value in item.items():
+                testers.append(PlanTester(id=str(key), name=str(value)))
+        elif isinstance(item, str):
+            name = item.strip()
+            if name:
+                testers.append(PlanTester(id=None, name=name))
+    return testers
 
 
 def _normalize_nine_grid(raw: Any) -> Dict[str, float]:

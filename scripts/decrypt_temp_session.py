@@ -70,7 +70,7 @@ def main(file_path: str, encoded_key: str) -> str:
 
 if __name__ == "__main__":
     # 在这里自定义你的文件路径和密钥
-    file_path = r"C:\PATVS\instances\slot-1\patvs\temp_action_and_num.json"       # 比如：r"D:\logs\temp_action_and_num.json.enc"
+    file_path = r"C:\FEIYAN\instances\slot-1\patvs\temp_action_and_num.json"       # 比如：r"D:\logs\temp_action_and_num.json.enc"
     encoded_key = "JZfpG9N5K4PQoQMtImxPv80DS-D-WPXr9DN0eF7zhR4="        # 你的 base64 Fernet 密钥字符串
 
     try:

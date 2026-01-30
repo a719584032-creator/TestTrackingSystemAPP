@@ -41,7 +41,7 @@ def configure_logging() -> Path:
         handler.close()  # 关闭旧处理器，释放资源
 
     # 设置日志等级，并注册新的处理器
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(console)
     root_logger.addHandler(file_handler)
 

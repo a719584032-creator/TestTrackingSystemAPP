@@ -82,7 +82,7 @@ TestTrackingSystemAPP/
 ## 配置与运行时数据
 - **API 地址**：默认值定义在 `config/settings.py` 中，可直接修改 `ClientSettings.api.base_url` 或在运行前加载自定义配置。
 - **本地存储**：
-  - 凭据、日志、监控缓存默认位于 `PATVS_ROOT`（Windows 为 `C:\PATVS`，其他平台为 `~/PATVS`）。可通过环境变量 `PATVS_ROOT` 指定新位置。
+  - 凭据、日志、监控缓存默认位于 `PATVS_ROOT`（Windows 为 `C:\FEIYAN`，其他平台为 `~/FEIYAN`）。可通过环境变量 `PATVS_ROOT` 指定新位置。
   - 窗口几何状态保存在 `~/.tts_client/window_state.json`，由 `ui/state.py` 负责读写。
   - OTA 下载目录默认为 `~/.tts_client/downloads/`，启动时自动创建。
 - **日志**：每日生成 `YYYYMMDD/application.log`，未捕获异常写入 `crash.log`，逻辑见 `utils/logging.py`。

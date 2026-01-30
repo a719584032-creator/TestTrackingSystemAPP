@@ -407,7 +407,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 延迟启动后台任务
         QtCore.QTimer.singleShot(100, self._load_departments)
-        QtCore.QTimer.singleShot(2000, self._start_update_check)
+        # 临时关闭 OTA 自动检测
+        # QtCore.QTimer.singleShot(2000, self._start_update_check)
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
@@ -1990,17 +1991,24 @@ class MainWindow(QtWidgets.QMainWindow):
         """ 更新计划进度统计 """
         detail = self._plan_detail
         if not detail:
-            self._plan_period_label.setText("执行时间：—")
-            self._plan_tester_label.setText("执行人员：—")
-            self._plan_progress_label.setText("执行进度：—")
+            self._plan_period_label.setText("执行时间：-")
+            self._plan_tester_label.setText("执行人员：-")
+            self._plan_progress_label.setText("执行进度：-")
             return
 
-        if detail.start_date and detail.end_date:
-            period = f"{detail.start_date} ~ {detail.end_date}"
-        elif detail.start_date:
-            period = f"自 {detail.start_date}"
-        elif detail.end_date:
-            period = f"截至 {detail.end_date}"
+        def _short_date(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return None
+            return str(value).split(" ")[0]
+
+        start_date = _short_date(detail.start_date)
+        end_date = _short_date(detail.end_date)
+        if start_date and end_date:
+            period = f"{start_date} ~ {end_date}"
+        elif start_date:
+            period = f"自 {start_date}"
+        elif end_date:
+            period = f"截至 {end_date}"
         else:
             period = "-"
 
